@@ -14,12 +14,14 @@ pub mod fuzzy;
 pub mod nonce;
 pub mod probe;
 pub mod signals;
+pub mod signing;
 pub mod state;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -29,6 +31,7 @@ use serde_json::Value;
 use crate::{
     nonce::NonceOutcome,
     signals::{PassiveSignals, StaticIpIntel},
+    signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER},
     state::AppState,
 };
 
@@ -104,7 +107,22 @@ async fn identify(
                 return StatusCode::UNAUTHORIZED.into_response();
             }
 
-            let outcome = state.matcher.identify(&req.stable_components, now_ms());
+            let now = now_ms();
+
+            // Timestamp window (T9, PRD §4.1): when enabled, bound how long a
+            // captured payload stays replayable by requiring the client `ts` to
+            // sit within the configured skew of server time. Fail-closed once
+            // enabled: a missing or out-of-window `ts` is rejected before matching.
+            if state.enforce_ts_window
+                && !req
+                    .ts
+                    .is_some_and(|ts| ts_in_window(ts, now, state.ts_skew_ms))
+            {
+                tracing::debug!("rejected identify: timestamp outside window");
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+
+            let outcome = state.matcher.identify(&req.stable_components, now);
 
             // Cross-check the client-reported UA against the unforgeable
             // edge-observed TLS stack / IP. Trust edge headers only behind a
@@ -137,15 +155,18 @@ async fn identify(
                 ip_risk = signals.ip_risk.as_str(),
                 "identified device",
             );
-            Json(IdentifyResponse {
+            let response = IdentifyResponse {
                 visitor_id: outcome.visitor_id,
                 confidence,
                 is_new_device: outcome.is_new_device,
                 decision: outcome.decision.as_str(),
                 collision_risk: outcome.collision_risk,
                 signals: Signals::from(signals),
-            })
-            .into_response()
+            };
+            // Serialize once and, when signing is enabled, attach the signature
+            // headers over those exact bytes so what is signed equals what is
+            // sent (T9). The JSON body shape is unchanged either way.
+            signed_json(&response, state.signer.as_deref(), now)
         }
         rejected => {
             tracing::debug!(?rejected, "rejected identify: nonce not valid");
@@ -170,6 +191,52 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Whether a client `ts` (Unix milliseconds) sits within `±skew_ms` of the
+/// server's `now_ms` (T9, PRD §4.1). Widened to `i128` so a future timestamp or
+/// a pre-epoch clock cannot overflow or wrap the subtraction.
+fn ts_in_window(client_ts: i64, now_ms: u64, skew_ms: u64) -> bool {
+    (i128::from(now_ms) - i128::from(client_ts)).abs() <= i128::from(skew_ms)
+}
+
+/// Build the `/identify` success response, attaching the signature headers when
+/// a [`ResponseSigner`] is configured (T9).
+///
+/// The body is serialized once; the signer signs those exact bytes so the
+/// signature covers what is sent. On the unreachable serialization or response
+/// build error the handler fails with `500` rather than panicking (Lock 6).
+fn signed_json(
+    response: &IdentifyResponse,
+    signer: Option<&ResponseSigner>,
+    issued_ms: u64,
+) -> Response {
+    let body = match serde_json::to_vec(response) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialize identify response");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(signer) = signer
+        && let Some(signature) = signer.sign(issued_ms, &body)
+    {
+        builder = builder
+            .header(SIGNATURE_TIMESTAMP_HEADER, issued_ms.to_string())
+            .header(SIGNATURE_HEADER, signature);
+    }
+
+    builder.body(Body::from(body)).map_or_else(
+        |err| {
+            tracing::error!(error = %err, "failed to build identify response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        },
+        IntoResponse::into_response,
+    )
 }
 
 /// Stable probe identifiers advertised in `GET /challenge` (static P0 plan).
@@ -237,10 +304,10 @@ impl ProbeDescriptor {
 
 /// `POST /identify` request body.
 ///
-/// The PRD's `ts` field is still accepted but ignored (serde drops unknown
-/// fields), as the timestamp window is out of scope here. The `probe` field is
-/// the nonce-probe response (T8): verified only when a probe key is configured,
-/// otherwise ignored.
+/// The `probe` field is the nonce-probe response (T8): verified only when a
+/// probe key is configured, otherwise ignored. The `ts` field is the client's
+/// Unix-millisecond timestamp (T9): checked against the server clock only when
+/// `enforce_ts_window` is on, otherwise ignored.
 #[derive(Debug, Deserialize)]
 struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
@@ -250,6 +317,11 @@ struct IdentifyRequest {
     /// probe key is configured; a missing or wrong value then yields `401`.
     #[serde(default)]
     probe: Option<String>,
+    /// Client timestamp in Unix milliseconds (T9, PRD §4.1/§5). Required and
+    /// checked against `±ts_skew_secs` only when `enforce_ts_window` is on; a
+    /// missing or out-of-window value then yields `401`. Ignored otherwise.
+    #[serde(default)]
+    ts: Option<i64>,
     /// Raw stable components (no nonce mixed in).
     stable_components: Value,
 }
@@ -437,6 +509,9 @@ mod tests {
             nonce_ttl_secs: 30,
             trust_edge_headers: false,
             probe: None,
+            signer: None,
+            enforce_ts_window: false,
+            ts_skew_ms: 30_000,
         };
         let router = build_router(state);
 
@@ -716,5 +791,158 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- Response signature + timestamp window (T9 / PRD §4.1) ---
+
+    use crate::signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER};
+
+    /// Shared signing secret used by the response-signing test router.
+    const SIGNING_SECRET: &str = "test-signing-secret";
+
+    /// Build a router that signs `/identify` responses with [`SIGNING_SECRET`].
+    fn router_with_signing() -> Router {
+        build_router(AppState::from_config(&Config {
+            response_signing_key: Some(SIGNING_SECRET.into()),
+            ..Config::default()
+        }))
+    }
+
+    /// Build a router that enforces the request timestamp window with `skew_secs`.
+    fn router_with_ts_window(skew_secs: u64) -> Router {
+        build_router(AppState::from_config(&Config {
+            enforce_ts_window: true,
+            ts_skew_secs: skew_secs,
+            ..Config::default()
+        }))
+    }
+
+    #[tokio::test]
+    async fn no_signing_key_omits_signature_headers() {
+        // Default router (no signing key): success carries no signature headers.
+        let router = test_router();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get(SIGNATURE_HEADER).is_none());
+        assert!(resp.headers().get(SIGNATURE_TIMESTAMP_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn signing_key_signs_response_verifiably() {
+        let router = router_with_signing();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Pull the signature headers, then the exact body bytes that were signed.
+        let issued_ms: u64 = resp
+            .headers()
+            .get(SIGNATURE_TIMESTAMP_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let signature = resp
+            .headers()
+            .get(SIGNATURE_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+
+        // The body is still valid JSON with a visitorId (shape unchanged).
+        let parsed: Value = serde_json::from_slice(&body).unwrap();
+        assert!(parsed["visitorId"].as_str().is_some());
+
+        let signer = ResponseSigner::new(SIGNING_SECRET.as_bytes());
+        // The advertised signature recomputes over the received timestamp + body.
+        assert_eq!(signer.sign(issued_ms, &body).unwrap(), signature);
+        // Tamper: a modified body no longer verifies.
+        let mut tampered = body.to_vec();
+        tampered.push(b' ');
+        assert_ne!(signer.sign(issued_ms, &tampered).unwrap(), signature);
+        // A caller without the shared key cannot forge the signature.
+        assert_ne!(
+            ResponseSigner::new(b"wrong-key")
+                .sign(issued_ms, &body)
+                .unwrap(),
+            signature
+        );
+    }
+
+    #[tokio::test]
+    async fn ts_window_accepts_fresh_rejects_stale_future_and_missing() {
+        let router = router_with_ts_window(30);
+        let now = i64::try_from(super::now_ms()).unwrap();
+
+        // Fresh: server-now is within the skew → accepted.
+        let nonce = fresh_nonce(&router).await;
+        let fresh = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(fresh.status(), StatusCode::OK);
+
+        // Stale: far in the past (beyond the 30s skew) → rejected.
+        let nonce = fresh_nonce(&router).await;
+        let stale = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now - 60_000, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::UNAUTHORIZED);
+
+        // Future: far ahead → rejected (skew is symmetric).
+        let nonce = fresh_nonce(&router).await;
+        let future = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now + 60_000, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(future.status(), StatusCode::UNAUTHORIZED);
+
+        // Missing `ts` while enforced → rejected (fail-closed once enabled).
+        let nonce = fresh_nonce(&router).await;
+        let missing = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ts_ignored_when_window_disabled() {
+        // Default router: a wildly stale `ts` is accepted because enforcement is
+        // off — the timestamp window is opt-in.
+        let router = test_router();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": 1, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn ts_in_window_is_symmetric_around_now() {
+        // Exactly at the edge (±skew) is inside; one past it is outside.
+        assert!(super::ts_in_window(1_000, 1_500, 500));
+        assert!(super::ts_in_window(2_000, 1_500, 500));
+        assert!(!super::ts_in_window(999, 1_500, 500));
+        assert!(!super::ts_in_window(2_001, 1_500, 500));
     }
 }

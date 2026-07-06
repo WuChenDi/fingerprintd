@@ -79,6 +79,26 @@ pub struct Config {
     /// legitimate traffic. Overridable via `FINGERPRINTD_PROBE_KEY`.
     #[serde(default)]
     pub probe_key: Option<SecretKey>,
+    /// Optional pre-shared HMAC key for signing `/identify` responses (T9, PRD
+    /// §4.1). When set (and non-empty), each success carries `x-fp-timestamp`
+    /// and `x-fp-signature` headers so a consumer can detect a tampered or forged
+    /// response (`crate::signing`). Left unset by default (fail-open on an absent
+    /// key): the response body is unchanged, so a non-verifying client is
+    /// unaffected. Overridable via `FINGERPRINTD_RESPONSE_SIGNING_KEY`.
+    #[serde(default)]
+    pub response_signing_key: Option<SecretKey>,
+    /// Whether to enforce the request timestamp window on `/identify` (T9, PRD
+    /// §4.1). When `true`, a request whose `ts` (Unix milliseconds) is absent or
+    /// more than `ts_skew_secs` from server time is rejected with `401`, bounding
+    /// how long a captured payload stays replayable on top of the one-time nonce.
+    /// Left `false` by default (fail-open): a client that does not send a `ts` is
+    /// unaffected. Overridable via `FINGERPRINTD_ENFORCE_TS_WINDOW`.
+    pub enforce_ts_window: bool,
+    /// Allowed clock skew, in seconds, for the request timestamp window when
+    /// `enforce_ts_window` is on (T9). A request is accepted iff its `ts` is
+    /// within `±ts_skew_secs` of server time. Overridable via
+    /// `FINGERPRINTD_TS_SKEW_SECS`.
+    pub ts_skew_secs: u64,
 }
 
 impl Default for Config {
@@ -88,6 +108,9 @@ impl Default for Config {
             nonce_ttl_secs: 30,
             trust_edge_headers: false,
             probe_key: None,
+            response_signing_key: None,
+            enforce_ts_window: false,
+            ts_skew_secs: 30,
         }
     }
 }
