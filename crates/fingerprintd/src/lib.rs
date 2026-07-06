@@ -10,6 +10,7 @@
 
 pub mod config;
 pub mod fingerprint;
+pub mod fuzzy;
 pub mod nonce;
 pub mod state;
 
