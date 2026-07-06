@@ -26,6 +26,10 @@ export interface Collected {
    *  when the challenge advertises `collect.challenge.verify` and the client
    *  holds the probe key. */
   probe?: string
+  /** Optional client timestamp in Unix milliseconds (T9). Stamped at collection
+   *  and echoed on `/identify`; the server checks it only when its timestamp
+   *  window is enforced. */
+  ts?: number
 }
 
 /** Turns a challenge into collected evidence. Async because real collectors do
