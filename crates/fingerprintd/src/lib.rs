@@ -12,6 +12,7 @@ pub mod config;
 pub mod fingerprint;
 pub mod fuzzy;
 pub mod nonce;
+pub mod probe;
 pub mod signals;
 pub mod state;
 
@@ -53,12 +54,16 @@ async fn health() -> StatusCode {
 /// `GET /challenge` — mint a one-time nonce and return the collection plan.
 async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
     let nonce = state.nonce_store.issue().await;
+    // Advertise the nonce-probe transform only when probe enforcement is on, so
+    // a probe-capable client knows to compute it (T8, PRD §4.1 pt 3).
+    let verify = state.probe.as_ref().map(|_| ProbeDescriptor::advertised());
     Json(ChallengeResponse {
         collect: Collect {
             stable: STABLE_PROBES.iter().map(|s| (*s).to_string()).collect(),
             challenge: ChallengeProbe {
                 seed: nonce.clone(),
                 targets: CHALLENGE_TARGETS.iter().map(|s| (*s).to_string()).collect(),
+                verify,
             },
         },
         expires_in: state.nonce_ttl_secs,
@@ -85,6 +90,20 @@ async fn identify(
 ) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
+            // Depth check on top of the one-time nonce (T8, PRD §4.1 pt 3): when
+            // a probe key is configured, require a correct `probe` proving the
+            // caller ran the advertised transform over this fresh nonce with the
+            // shared key. A missing or forged probe is rejected before matching.
+            if let Some(verifier) = &state.probe
+                && !req
+                    .probe
+                    .as_deref()
+                    .is_some_and(|probe| verifier.verify(&req.nonce, probe))
+            {
+                tracing::debug!("rejected identify: nonce probe verification failed");
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+
             let outcome = state.matcher.identify(&req.stable_components, now_ms());
 
             // Cross-check the client-reported UA against the unforgeable
@@ -185,17 +204,52 @@ struct ChallengeProbe {
     seed: String,
     /// Probe targets to render.
     targets: Vec<String>,
+    /// Nonce-probe transform the client must compute and echo on `identify`
+    /// (T8). Present only when probe enforcement is enabled; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verify: Option<ProbeDescriptor>,
+}
+
+/// Advertised nonce-probe transform (T8, PRD §4.1 pt 3): the client computes
+/// `encoding(alg(shared_key, input))` — `hex(HMAC-SHA256(shared_key, nonce))` —
+/// and returns it as `probe`. The shared key is not advertised; only the
+/// transform is.
+#[derive(Debug, Serialize)]
+struct ProbeDescriptor {
+    /// Keyed-hash algorithm, e.g. `HMAC-SHA256`.
+    alg: &'static str,
+    /// Transform input: the issued `nonce`.
+    input: &'static str,
+    /// Output encoding of the computed tag, e.g. `hex`.
+    encoding: &'static str,
+}
+
+impl ProbeDescriptor {
+    /// The fixed transform advertised to clients.
+    fn advertised() -> Self {
+        Self {
+            alg: probe::PROBE_ALG,
+            input: probe::PROBE_INPUT,
+            encoding: probe::PROBE_ENCODING,
+        }
+    }
 }
 
 /// `POST /identify` request body.
 ///
-/// Only the fields P0 acts on are declared; the PRD's `ts` and
-/// `challenge_response` are accepted but ignored (serde drops unknown fields),
-/// as passive signals and challenge verification are out of scope for P0.
+/// The PRD's `ts` field is still accepted but ignored (serde drops unknown
+/// fields), as the timestamp window is out of scope here. The `probe` field is
+/// the nonce-probe response (T8): verified only when a probe key is configured,
+/// otherwise ignored.
 #[derive(Debug, Deserialize)]
 struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
     nonce: String,
+    /// Nonce-probe response: `hex(HMAC-SHA256(shared_key, nonce))`, as advertised
+    /// by `GET /challenge` (T8, PRD §4.1 pt 3). Required and verified only when a
+    /// probe key is configured; a missing or wrong value then yields `401`.
+    #[serde(default)]
+    probe: Option<String>,
     /// Raw stable components (no nonce mixed in).
     stable_components: Value,
 }
@@ -382,6 +436,7 @@ mod tests {
             matcher: Arc::new(crate::fuzzy::FuzzyStore::new()),
             nonce_ttl_secs: 30,
             trust_edge_headers: false,
+            probe: None,
         };
         let router = build_router(state);
 
@@ -552,5 +607,114 @@ mod tests {
         assert_eq!(trusted["signals"]["ip_risk"], json!("high"));
         // The forged JA4 buys no evidence-based consistency (degrade default).
         assert_eq!(untrusted["signals"]["ua_tls_consistent"], json!(true));
+    }
+
+    // --- Nonce probe verification (T8 / PRD §4.1 pt 3) ---
+
+    use crate::probe::{PROBE_ALG, ProbeVerifier};
+
+    /// Shared probe secret used by the probe-enforcing test router.
+    const PROBE_SECRET: &str = "test-probe-secret";
+
+    /// Build a router that enforces the nonce probe with [`PROBE_SECRET`].
+    fn router_with_probe() -> Router {
+        build_router(AppState::from_config(&Config {
+            probe_key: Some(PROBE_SECRET.into()),
+            ..Config::default()
+        }))
+    }
+
+    /// The correct probe a legitimate client returns for `nonce`.
+    fn expected_probe(nonce: &str) -> String {
+        ProbeVerifier::new(PROBE_SECRET.as_bytes())
+            .expected_hex(nonce)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn probe_challenge_advertises_transform() {
+        // With a probe key configured, /challenge advertises the transform.
+        let body = json_body(get(&router_with_probe(), "/challenge").await).await;
+        let verify = &body["collect"]["challenge"]["verify"];
+        assert_eq!(verify["alg"], json!(PROBE_ALG));
+        assert_eq!(verify["input"], json!("nonce"));
+        assert_eq!(verify["encoding"], json!("hex"));
+    }
+
+    #[tokio::test]
+    async fn probe_happy_path_verifies_and_identifies() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        let probe = expected_probe(&nonce);
+
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": probe, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(json_body(resp).await["visitorId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn probe_forged_response_rejected() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        // A caller without the shared key computes the transform under the wrong
+        // key, so its probe cannot match.
+        let forged = ProbeVerifier::new(b"wrong-key")
+            .expected_hex(&nonce)
+            .unwrap();
+
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": forged, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn probe_missing_rejected_when_configured() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        // No `probe` field: rejected before matching (fail-closed when enabled).
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn probe_valid_then_replayed_rejected() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        let body = json!({ "nonce": nonce, "probe": expected_probe(&nonce), "stable_components": {"ua": "x"} });
+
+        let first = post_identify(&router, body.clone()).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        // Replaying the same nonce + valid probe still fails: the one-time nonce
+        // is the primary anti-replay lock, the probe is only depth.
+        let second = post_identify(&router, body).await;
+        assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn no_probe_key_omits_descriptor_and_ignores_probe_field() {
+        // Default router: no probe key → transform not advertised.
+        let router = test_router();
+        let body = json_body(get(&router, "/challenge").await).await;
+        assert!(body["collect"]["challenge"].get("verify").is_none());
+
+        // An arbitrary `probe` value is ignored when enforcement is off.
+        let nonce = body["nonce"].as_str().unwrap().to_string();
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": "ignored", "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

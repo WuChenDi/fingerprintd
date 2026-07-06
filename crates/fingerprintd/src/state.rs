@@ -6,6 +6,7 @@ use crate::{
     config::Config,
     fuzzy::FuzzyStore,
     nonce::{InMemoryNonceStore, NonceStore},
+    probe::ProbeVerifier,
 };
 
 /// State shared by every handler, cloned per request (all fields are `Arc` or
@@ -22,17 +23,27 @@ pub struct AppState {
     /// `false`, `/identify` ignores client-supplied `CF-Connecting-IP` /
     /// `cf-bot-management-ja4` copies (fail-closed).
     pub trust_edge_headers: bool,
+    /// Nonce-probe verifier (T8). `Some` only when a `probe_key` is configured;
+    /// then `/challenge` advertises the transform and `/identify` requires a
+    /// correct probe. `None` disables probe enforcement (default).
+    pub probe: Option<Arc<ProbeVerifier>>,
 }
 
 impl AppState {
     /// Build state from configuration, using the in-memory backends.
     pub fn from_config(config: &Config) -> Self {
         let ttl = std::time::Duration::from_secs(config.nonce_ttl_secs);
+        let probe = config
+            .probe_key
+            .as_ref()
+            .filter(|key| key.is_configured())
+            .map(|key| Arc::new(ProbeVerifier::new(key.as_bytes())));
         Self {
             nonce_store: Arc::new(InMemoryNonceStore::new(ttl)),
             matcher: Arc::new(FuzzyStore::new()),
             nonce_ttl_secs: config.nonce_ttl_secs,
             trust_edge_headers: config.trust_edge_headers,
+            probe,
         }
     }
 }
@@ -43,6 +54,7 @@ impl fmt::Debug for AppState {
         f.debug_struct("AppState")
             .field("nonce_ttl_secs", &self.nonce_ttl_secs)
             .field("trust_edge_headers", &self.trust_edge_headers)
+            .field("probe_enabled", &self.probe.is_some())
             .finish_non_exhaustive()
     }
 }
