@@ -4,7 +4,7 @@ use std::{fmt, sync::Arc};
 
 use crate::{
     config::Config,
-    fingerprint::FingerprintStore,
+    fuzzy::FuzzyStore,
     nonce::{InMemoryNonceStore, NonceStore},
 };
 
@@ -14,19 +14,19 @@ use crate::{
 pub struct AppState {
     /// Backing store for one-time challenge nonces.
     pub nonce_store: Arc<dyn NonceStore>,
-    /// Exact-match fingerprint store.
-    pub fingerprints: Arc<FingerprintStore>,
+    /// Weighted fuzzy matching engine and its fingerprint library.
+    pub matcher: Arc<FuzzyStore>,
     /// Nonce lifetime advertised to clients as `expires_in`.
     pub nonce_ttl_secs: u64,
 }
 
 impl AppState {
-    /// Build state from configuration, using the in-memory P0 backends.
+    /// Build state from configuration, using the in-memory backends.
     pub fn from_config(config: &Config) -> Self {
         let ttl = std::time::Duration::from_secs(config.nonce_ttl_secs);
         Self {
             nonce_store: Arc::new(InMemoryNonceStore::new(ttl)),
-            fingerprints: Arc::new(FingerprintStore::new()),
+            matcher: Arc::new(FuzzyStore::new()),
             nonce_ttl_secs: config.nonce_ttl_secs,
         }
     }

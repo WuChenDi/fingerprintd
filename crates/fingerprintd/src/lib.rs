@@ -1,15 +1,16 @@
 //! `fingerprintd` — server-side device fingerprinting service.
 //!
-//! This crate hosts the HTTP surface for the P0 milestone. The router is built
-//! by [`build_router`] and exposes the challenge/response identification flow
-//! (PRD §5): `GET /challenge` mints a one-time nonce and `POST /identify`
-//! consumes it, rejecting expired or replayed nonces before running exact
-//! fingerprint matching.
+//! This crate hosts the HTTP surface. The router is built by [`build_router`]
+//! and exposes the challenge/response identification flow (PRD §5):
+//! `GET /challenge` mints a one-time nonce and `POST /identify` consumes it,
+//! rejecting expired or replayed nonces before running the weighted fuzzy
+//! matching engine (design §4/§5) to resolve the device.
 
 #![forbid(unsafe_code)]
 
 pub mod config;
 pub mod fingerprint;
+pub mod fuzzy;
 pub mod nonce;
 pub mod state;
 
@@ -63,23 +64,29 @@ async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
 /// `POST /identify` — consume the nonce (anti-replay) then match the device.
 ///
 /// A non-[`NonceOutcome::Valid`] nonce (expired, reused, or unknown) yields
-/// `401` before any matching runs. On success the response carries the stable
-/// `visitorId` with `confidence = 1.0` — the P0 exact-match rule.
+/// `401` before any matching runs. On success the response carries the resolved
+/// `visitorId` and the weighted engine's computed `confidence`, decision, and
+/// collision flag (design §5/§6).
 async fn identify(State(state): State<AppState>, Json(req): Json<IdentifyRequest>) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
-            let outcome = state.fingerprints.identify(&req.stable_components);
+            let outcome = state.matcher.identify(&req.stable_components, now_ms());
             tracing::debug!(
                 visitor_id = %outcome.visitor_id,
                 is_new_device = outcome.is_new_device,
-                seen_count = outcome.seen_count,
+                decision = outcome.decision.as_str(),
+                score = ?outcome.score,
+                compared = outcome.compared_components,
+                collision_risk = outcome.collision_risk,
+                confidence = outcome.confidence,
                 "identified device",
             );
             Json(IdentifyResponse {
                 visitor_id: outcome.visitor_id,
-                // Exact match is fully confident by definition in P0.
-                confidence: 1.0,
+                confidence: outcome.confidence,
                 is_new_device: outcome.is_new_device,
+                decision: outcome.decision.as_str(),
+                collision_risk: outcome.collision_risk,
                 signals: Signals::stub(),
             })
             .into_response()
@@ -89,6 +96,14 @@ async fn identify(State(state): State<AppState>, Json(req): Json<IdentifyRequest
             StatusCode::UNAUTHORIZED.into_response()
         }
     }
+}
+
+/// Current Unix time in milliseconds, saturating to `0` before the epoch — the
+/// timestamp the matcher stamps onto observations.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Stable probe identifiers advertised in `GET /challenge` (static P0 plan).
@@ -144,11 +159,17 @@ struct IdentifyResponse {
     /// Stable device identifier.
     #[serde(rename = "visitorId")]
     visitor_id: String,
-    /// Match confidence in `[0.0, 1.0]`; always `1.0` for a P0 exact match.
+    /// Fused match confidence in `[0.0, 1.0]` (design §6).
     confidence: f64,
     /// Whether this device was newly recorded.
     is_new_device: bool,
-    /// Risk signals for downstream consumers (static stub in P0).
+    /// Verdict from the weighted engine: `match`, `review`, or `new_device`
+    /// (design §5.4).
+    decision: &'static str,
+    /// Set when a runner-up candidate also cleared the match threshold within
+    /// the collision margin (design §5.4).
+    collision_risk: bool,
+    /// Risk signals for downstream consumers (static stub; passive signals P2).
     signals: Signals,
 }
 
@@ -251,8 +272,12 @@ mod tests {
 
         let body = json_body(resp).await;
         assert!(body["visitorId"].as_str().is_some());
-        assert_eq!(body["confidence"], json!(1.0));
+        // A first-ever probe has no candidate: it is a new device with a
+        // computed (no longer hardcoded) confidence in [0, 1].
+        let confidence = body["confidence"].as_f64().unwrap();
+        assert!((0.0..=1.0).contains(&confidence));
         assert_eq!(body["is_new_device"], json!(true));
+        assert_eq!(body["decision"], json!("new_device"));
     }
 
     #[tokio::test]
@@ -287,7 +312,7 @@ mod tests {
         let nonce = store.issue_with_ttl(Duration::ZERO);
         let state = AppState {
             nonce_store: store,
-            fingerprints: Arc::new(crate::fingerprint::FingerprintStore::new()),
+            matcher: Arc::new(crate::fuzzy::FuzzyStore::new()),
             nonce_ttl_secs: 30,
         };
         let router = build_router(state);
@@ -300,45 +325,58 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
+    /// A rich, realistic stable-component probe the fuzzy engine can score.
+    fn probe_components() -> Value {
+        json!({
+            "webgl": "ANGLE (Intel)",
+            "platform": "Linux x86_64",
+            "timezone": "Asia/Shanghai",
+            "audio": "124.04",
+            "cpu_cores": 8,
+            "device_memory": 8,
+            "fonts": ["Arial", "Helvetica", "Courier", "Times", "Verdana"],
+            "user_agent": "Chrome/120",
+        })
+    }
+
+    /// POST `/identify` for `components` under a fresh nonce, returning the body.
+    async fn identify_with(router: &Router, components: Value) -> Value {
+        let nonce = fresh_nonce(router).await;
+        json_body(
+            post_identify(
+                router,
+                json!({ "nonce": nonce, "ts": 1, "stable_components": components }),
+            )
+            .await,
+        )
+        .await
+    }
+
     #[tokio::test]
-    async fn exact_fallback_match_across_requests() {
+    async fn fuzzy_match_across_requests() {
         let router = test_router();
 
-        // Same components, two fresh nonces -> same visitor, second not new.
-        let nonce_a = fresh_nonce(&router).await;
-        let first = json_body(
-            post_identify(
-                &router,
-                json!({ "nonce": nonce_a, "ts": 1, "stable_components": {"ua": "x", "tz": "UTC"} }),
-            )
-            .await,
-        )
-        .await;
-
-        let nonce_b = fresh_nonce(&router).await;
-        let second = json_body(
-            post_identify(
-                &router,
-                json!({ "nonce": nonce_b, "ts": 2, "stable_components": {"ua": "x", "tz": "UTC"} }),
-            )
-            .await,
-        )
-        .await;
+        // Same rich components, two fresh nonces -> same visitor, second matched.
+        let first = identify_with(&router, probe_components()).await;
+        let second = identify_with(&router, probe_components()).await;
 
         assert_eq!(first["visitorId"], second["visitorId"]);
         assert_eq!(first["is_new_device"], json!(true));
         assert_eq!(second["is_new_device"], json!(false));
+        assert_eq!(second["decision"], json!("match"));
 
-        // Different components -> different visitor, marked new.
-        let nonce_c = fresh_nonce(&router).await;
-        let third = json_body(
-            post_identify(
-                &router,
-                json!({ "nonce": nonce_c, "ts": 3, "stable_components": {"ua": "y"} }),
-            )
-            .await,
-        )
-        .await;
+        // A disjoint device -> different visitor, marked new.
+        let other = json!({
+            "webgl": "Apple GPU",
+            "platform": "iPhone",
+            "timezone": "America/New_York",
+            "audio": "35.7",
+            "cpu_cores": 6,
+            "device_memory": 4,
+            "fonts": ["SF Pro", "Menlo", "Georgia", "Palatino"],
+            "user_agent": "Safari/17",
+        });
+        let third = identify_with(&router, other).await;
         assert_ne!(third["visitorId"], first["visitorId"]);
         assert_eq!(third["is_new_device"], json!(true));
     }
