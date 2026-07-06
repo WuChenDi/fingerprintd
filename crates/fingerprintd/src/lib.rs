@@ -12,6 +12,7 @@ pub mod config;
 pub mod fingerprint;
 pub mod fuzzy;
 pub mod nonce;
+pub mod signals;
 pub mod state;
 
 use axum::{
