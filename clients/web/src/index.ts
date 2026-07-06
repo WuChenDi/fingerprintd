@@ -19,6 +19,15 @@ import type { Collector } from './collect'
 import { verifySignature } from './signature'
 import type { IdentifyRequest, IdentifyResponse } from './types'
 
+export type {
+  AudioRenderer,
+  AudioToneParams,
+  CanvasContext2D,
+  CanvasSurface,
+  CanvasSurfaceFactory,
+  ChallengeCollectorOptions,
+} from './challenge'
+export { challengeCollector, collectChallengeResponse } from './challenge'
 export type { ClientOptions, FetchLike, IdentifyResult } from './client'
 export { getChallenge, identify } from './client'
 export type { Collected, Collector } from './collect'
