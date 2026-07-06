@@ -5,7 +5,7 @@
 
 use std::process::ExitCode;
 
-use fingerprintd::{build_router, config::Config};
+use fingerprintd::{build_router, config::Config, state::AppState};
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
@@ -26,10 +26,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load()?;
     tracing::info!(bind_addr = %config.bind_addr, "starting fingerprintd");
 
+    let state = AppState::from_config(&config);
+
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!(local_addr = %listener.local_addr()?, "listening");
 
-    axum::serve(listener, build_router())
+    axum::serve(listener, build_router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
