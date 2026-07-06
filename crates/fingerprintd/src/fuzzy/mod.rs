@@ -22,6 +22,7 @@
 pub mod blocking;
 pub mod component;
 pub mod engine;
+pub mod eval;
 pub mod frequency;
 pub mod minhash;
 pub mod record;
