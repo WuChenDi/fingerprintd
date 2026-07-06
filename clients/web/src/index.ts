@@ -32,12 +32,16 @@ export type { ClientOptions, FetchLike, IdentifyResult } from './client'
 export { getChallenge, identify } from './client'
 export type { Collected, Collector } from './collect'
 export { stubCollector } from './collect'
+export type { FullCollectorOptions } from './collector'
+export { createCollector } from './collector'
 export type {
   BotdDetector,
   FingerprintAgent,
   FingerprintCollectorDeps,
 } from './fingerprint'
 export { createFingerprintCollector } from './fingerprint'
+export type { ProbeFn } from './probe'
+export { initProbe, wasmProbeFn } from './probe'
 export {
   SIGNATURE_HEADER,
   SIGNATURE_TIMESTAMP_HEADER,
@@ -90,6 +94,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
     nonce: challenge.nonce,
     stable_components: collected.stable_components,
   }
+  if (collected.ts !== undefined) request.ts = collected.ts
   if (collected.probe !== undefined) request.probe = collected.probe
   if (collected.challenge_response !== undefined) {
     request.challenge_response = collected.challenge_response
