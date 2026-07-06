@@ -12,13 +12,16 @@ pub mod config;
 pub mod fingerprint;
 pub mod fuzzy;
 pub mod nonce;
+pub mod probe;
 pub mod signals;
+pub mod signing;
 pub mod state;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -28,6 +31,7 @@ use serde_json::Value;
 use crate::{
     nonce::NonceOutcome,
     signals::{PassiveSignals, StaticIpIntel},
+    signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER},
     state::AppState,
 };
 
@@ -53,12 +57,16 @@ async fn health() -> StatusCode {
 /// `GET /challenge` — mint a one-time nonce and return the collection plan.
 async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
     let nonce = state.nonce_store.issue().await;
+    // Advertise the nonce-probe transform only when probe enforcement is on, so
+    // a probe-capable client knows to compute it (T8, PRD §4.1 pt 3).
+    let verify = state.probe.as_ref().map(|_| ProbeDescriptor::advertised());
     Json(ChallengeResponse {
         collect: Collect {
             stable: STABLE_PROBES.iter().map(|s| (*s).to_string()).collect(),
             challenge: ChallengeProbe {
                 seed: nonce.clone(),
                 targets: CHALLENGE_TARGETS.iter().map(|s| (*s).to_string()).collect(),
+                verify,
             },
         },
         expires_in: state.nonce_ttl_secs,
@@ -85,7 +93,36 @@ async fn identify(
 ) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
-            let outcome = state.matcher.identify(&req.stable_components, now_ms());
+            // Depth check on top of the one-time nonce (T8, PRD §4.1 pt 3): when
+            // a probe key is configured, require a correct `probe` proving the
+            // caller ran the advertised transform over this fresh nonce with the
+            // shared key. A missing or forged probe is rejected before matching.
+            if let Some(verifier) = &state.probe
+                && !req
+                    .probe
+                    .as_deref()
+                    .is_some_and(|probe| verifier.verify(&req.nonce, probe))
+            {
+                tracing::debug!("rejected identify: nonce probe verification failed");
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+
+            let now = now_ms();
+
+            // Timestamp window (T9, PRD §4.1): when enabled, bound how long a
+            // captured payload stays replayable by requiring the client `ts` to
+            // sit within the configured skew of server time. Fail-closed once
+            // enabled: a missing or out-of-window `ts` is rejected before matching.
+            if state.enforce_ts_window
+                && !req
+                    .ts
+                    .is_some_and(|ts| ts_in_window(ts, now, state.ts_skew_ms))
+            {
+                tracing::debug!("rejected identify: timestamp outside window");
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+
+            let outcome = state.matcher.identify(&req.stable_components, now);
 
             // Cross-check the client-reported UA against the unforgeable
             // edge-observed TLS stack / IP. Trust edge headers only behind a
@@ -118,15 +155,18 @@ async fn identify(
                 ip_risk = signals.ip_risk.as_str(),
                 "identified device",
             );
-            Json(IdentifyResponse {
+            let response = IdentifyResponse {
                 visitor_id: outcome.visitor_id,
                 confidence,
                 is_new_device: outcome.is_new_device,
                 decision: outcome.decision.as_str(),
                 collision_risk: outcome.collision_risk,
                 signals: Signals::from(signals),
-            })
-            .into_response()
+            };
+            // Serialize once and, when signing is enabled, attach the signature
+            // headers over those exact bytes so what is signed equals what is
+            // sent (T9). The JSON body shape is unchanged either way.
+            signed_json(&response, state.signer.as_deref(), now)
         }
         rejected => {
             tracing::debug!(?rejected, "rejected identify: nonce not valid");
@@ -151,6 +191,52 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Whether a client `ts` (Unix milliseconds) sits within `±skew_ms` of the
+/// server's `now_ms` (T9, PRD §4.1). Widened to `i128` so a future timestamp or
+/// a pre-epoch clock cannot overflow or wrap the subtraction.
+fn ts_in_window(client_ts: i64, now_ms: u64, skew_ms: u64) -> bool {
+    (i128::from(now_ms) - i128::from(client_ts)).abs() <= i128::from(skew_ms)
+}
+
+/// Build the `/identify` success response, attaching the signature headers when
+/// a [`ResponseSigner`] is configured (T9).
+///
+/// The body is serialized once; the signer signs those exact bytes so the
+/// signature covers what is sent. On the unreachable serialization or response
+/// build error the handler fails with `500` rather than panicking (Lock 6).
+fn signed_json(
+    response: &IdentifyResponse,
+    signer: Option<&ResponseSigner>,
+    issued_ms: u64,
+) -> Response {
+    let body = match serde_json::to_vec(response) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialize identify response");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(signer) = signer
+        && let Some(signature) = signer.sign(issued_ms, &body)
+    {
+        builder = builder
+            .header(SIGNATURE_TIMESTAMP_HEADER, issued_ms.to_string())
+            .header(SIGNATURE_HEADER, signature);
+    }
+
+    builder.body(Body::from(body)).map_or_else(
+        |err| {
+            tracing::error!(error = %err, "failed to build identify response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        },
+        IntoResponse::into_response,
+    )
 }
 
 /// Stable probe identifiers advertised in `GET /challenge` (static P0 plan).
@@ -185,17 +271,57 @@ struct ChallengeProbe {
     seed: String,
     /// Probe targets to render.
     targets: Vec<String>,
+    /// Nonce-probe transform the client must compute and echo on `identify`
+    /// (T8). Present only when probe enforcement is enabled; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verify: Option<ProbeDescriptor>,
+}
+
+/// Advertised nonce-probe transform (T8, PRD §4.1 pt 3): the client computes
+/// `encoding(alg(shared_key, input))` — `hex(HMAC-SHA256(shared_key, nonce))` —
+/// and returns it as `probe`. The shared key is not advertised; only the
+/// transform is.
+#[derive(Debug, Serialize)]
+struct ProbeDescriptor {
+    /// Keyed-hash algorithm, e.g. `HMAC-SHA256`.
+    alg: &'static str,
+    /// Transform input: the issued `nonce`.
+    input: &'static str,
+    /// Output encoding of the computed tag, e.g. `hex`.
+    encoding: &'static str,
+}
+
+impl ProbeDescriptor {
+    /// The fixed transform advertised to clients.
+    fn advertised() -> Self {
+        Self {
+            alg: probe::PROBE_ALG,
+            input: probe::PROBE_INPUT,
+            encoding: probe::PROBE_ENCODING,
+        }
+    }
 }
 
 /// `POST /identify` request body.
 ///
-/// Only the fields P0 acts on are declared; the PRD's `ts` and
-/// `challenge_response` are accepted but ignored (serde drops unknown fields),
-/// as passive signals and challenge verification are out of scope for P0.
+/// The `probe` field is the nonce-probe response (T8): verified only when a
+/// probe key is configured, otherwise ignored. The `ts` field is the client's
+/// Unix-millisecond timestamp (T9): checked against the server clock only when
+/// `enforce_ts_window` is on, otherwise ignored.
 #[derive(Debug, Deserialize)]
 struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
     nonce: String,
+    /// Nonce-probe response: `hex(HMAC-SHA256(shared_key, nonce))`, as advertised
+    /// by `GET /challenge` (T8, PRD §4.1 pt 3). Required and verified only when a
+    /// probe key is configured; a missing or wrong value then yields `401`.
+    #[serde(default)]
+    probe: Option<String>,
+    /// Client timestamp in Unix milliseconds (T9, PRD §4.1/§5). Required and
+    /// checked against `±ts_skew_secs` only when `enforce_ts_window` is on; a
+    /// missing or out-of-window value then yields `401`. Ignored otherwise.
+    #[serde(default)]
+    ts: Option<i64>,
     /// Raw stable components (no nonce mixed in).
     stable_components: Value,
 }
@@ -382,6 +508,10 @@ mod tests {
             matcher: Arc::new(crate::fuzzy::FuzzyStore::new()),
             nonce_ttl_secs: 30,
             trust_edge_headers: false,
+            probe: None,
+            signer: None,
+            enforce_ts_window: false,
+            ts_skew_ms: 30_000,
         };
         let router = build_router(state);
 
@@ -552,5 +682,267 @@ mod tests {
         assert_eq!(trusted["signals"]["ip_risk"], json!("high"));
         // The forged JA4 buys no evidence-based consistency (degrade default).
         assert_eq!(untrusted["signals"]["ua_tls_consistent"], json!(true));
+    }
+
+    // --- Nonce probe verification (T8 / PRD §4.1 pt 3) ---
+
+    use crate::probe::{PROBE_ALG, ProbeVerifier};
+
+    /// Shared probe secret used by the probe-enforcing test router.
+    const PROBE_SECRET: &str = "test-probe-secret";
+
+    /// Build a router that enforces the nonce probe with [`PROBE_SECRET`].
+    fn router_with_probe() -> Router {
+        build_router(AppState::from_config(&Config {
+            probe_key: Some(PROBE_SECRET.into()),
+            ..Config::default()
+        }))
+    }
+
+    /// The correct probe a legitimate client returns for `nonce`.
+    fn expected_probe(nonce: &str) -> String {
+        ProbeVerifier::new(PROBE_SECRET.as_bytes())
+            .expected_hex(nonce)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn probe_challenge_advertises_transform() {
+        // With a probe key configured, /challenge advertises the transform.
+        let body = json_body(get(&router_with_probe(), "/challenge").await).await;
+        let verify = &body["collect"]["challenge"]["verify"];
+        assert_eq!(verify["alg"], json!(PROBE_ALG));
+        assert_eq!(verify["input"], json!("nonce"));
+        assert_eq!(verify["encoding"], json!("hex"));
+    }
+
+    #[tokio::test]
+    async fn probe_happy_path_verifies_and_identifies() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        let probe = expected_probe(&nonce);
+
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": probe, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(json_body(resp).await["visitorId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn probe_forged_response_rejected() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        // A caller without the shared key computes the transform under the wrong
+        // key, so its probe cannot match.
+        let forged = ProbeVerifier::new(b"wrong-key")
+            .expected_hex(&nonce)
+            .unwrap();
+
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": forged, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn probe_missing_rejected_when_configured() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        // No `probe` field: rejected before matching (fail-closed when enabled).
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn probe_valid_then_replayed_rejected() {
+        let router = router_with_probe();
+        let nonce = fresh_nonce(&router).await;
+        let body = json!({ "nonce": nonce, "probe": expected_probe(&nonce), "stable_components": {"ua": "x"} });
+
+        let first = post_identify(&router, body.clone()).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        // Replaying the same nonce + valid probe still fails: the one-time nonce
+        // is the primary anti-replay lock, the probe is only depth.
+        let second = post_identify(&router, body).await;
+        assert_eq!(second.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn no_probe_key_omits_descriptor_and_ignores_probe_field() {
+        // Default router: no probe key → transform not advertised.
+        let router = test_router();
+        let body = json_body(get(&router, "/challenge").await).await;
+        assert!(body["collect"]["challenge"].get("verify").is_none());
+
+        // An arbitrary `probe` value is ignored when enforcement is off.
+        let nonce = body["nonce"].as_str().unwrap().to_string();
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "probe": "ignored", "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- Response signature + timestamp window (T9 / PRD §4.1) ---
+
+    use crate::signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER};
+
+    /// Shared signing secret used by the response-signing test router.
+    const SIGNING_SECRET: &str = "test-signing-secret";
+
+    /// Build a router that signs `/identify` responses with [`SIGNING_SECRET`].
+    fn router_with_signing() -> Router {
+        build_router(AppState::from_config(&Config {
+            response_signing_key: Some(SIGNING_SECRET.into()),
+            ..Config::default()
+        }))
+    }
+
+    /// Build a router that enforces the request timestamp window with `skew_secs`.
+    fn router_with_ts_window(skew_secs: u64) -> Router {
+        build_router(AppState::from_config(&Config {
+            enforce_ts_window: true,
+            ts_skew_secs: skew_secs,
+            ..Config::default()
+        }))
+    }
+
+    #[tokio::test]
+    async fn no_signing_key_omits_signature_headers() {
+        // Default router (no signing key): success carries no signature headers.
+        let router = test_router();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get(SIGNATURE_HEADER).is_none());
+        assert!(resp.headers().get(SIGNATURE_TIMESTAMP_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn signing_key_signs_response_verifiably() {
+        let router = router_with_signing();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Pull the signature headers, then the exact body bytes that were signed.
+        let issued_ms: u64 = resp
+            .headers()
+            .get(SIGNATURE_TIMESTAMP_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let signature = resp
+            .headers()
+            .get(SIGNATURE_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+
+        // The body is still valid JSON with a visitorId (shape unchanged).
+        let parsed: Value = serde_json::from_slice(&body).unwrap();
+        assert!(parsed["visitorId"].as_str().is_some());
+
+        let signer = ResponseSigner::new(SIGNING_SECRET.as_bytes());
+        // The advertised signature recomputes over the received timestamp + body.
+        assert_eq!(signer.sign(issued_ms, &body).unwrap(), signature);
+        // Tamper: a modified body no longer verifies.
+        let mut tampered = body.to_vec();
+        tampered.push(b' ');
+        assert_ne!(signer.sign(issued_ms, &tampered).unwrap(), signature);
+        // A caller without the shared key cannot forge the signature.
+        assert_ne!(
+            ResponseSigner::new(b"wrong-key")
+                .sign(issued_ms, &body)
+                .unwrap(),
+            signature
+        );
+    }
+
+    #[tokio::test]
+    async fn ts_window_accepts_fresh_rejects_stale_future_and_missing() {
+        let router = router_with_ts_window(30);
+        let now = i64::try_from(super::now_ms()).unwrap();
+
+        // Fresh: server-now is within the skew → accepted.
+        let nonce = fresh_nonce(&router).await;
+        let fresh = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(fresh.status(), StatusCode::OK);
+
+        // Stale: far in the past (beyond the 30s skew) → rejected.
+        let nonce = fresh_nonce(&router).await;
+        let stale = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now - 60_000, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::UNAUTHORIZED);
+
+        // Future: far ahead → rejected (skew is symmetric).
+        let nonce = fresh_nonce(&router).await;
+        let future = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": now + 60_000, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(future.status(), StatusCode::UNAUTHORIZED);
+
+        // Missing `ts` while enforced → rejected (fail-closed once enabled).
+        let nonce = fresh_nonce(&router).await;
+        let missing = post_identify(
+            &router,
+            json!({ "nonce": nonce, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn ts_ignored_when_window_disabled() {
+        // Default router: a wildly stale `ts` is accepted because enforcement is
+        // off — the timestamp window is opt-in.
+        let router = test_router();
+        let nonce = fresh_nonce(&router).await;
+        let resp = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": 1, "stable_components": {"ua": "x"} }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn ts_in_window_is_symmetric_around_now() {
+        // Exactly at the edge (±skew) is inside; one past it is outside.
+        assert!(super::ts_in_window(1_000, 1_500, 500));
+        assert!(super::ts_in_window(2_000, 1_500, 500));
+        assert!(!super::ts_in_window(999, 1_500, 500));
+        assert!(!super::ts_in_window(2_001, 1_500, 500));
     }
 }
