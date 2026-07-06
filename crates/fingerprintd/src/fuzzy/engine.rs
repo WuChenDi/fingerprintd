@@ -457,4 +457,45 @@ mod tests {
             full.confidence,
         );
     }
+
+    /// (d, anti-poisoning) Drift updates the template ONLY on a `≥ T_hi` match
+    /// (design §7). An ambiguous `[T_lo, T_hi)` review-band hit must NOT mutate
+    /// the stored template, so an attacker cannot walk one device's fingerprint
+    /// toward another through a run of low-confidence near-misses.
+    #[test]
+    fn review_band_hit_does_not_drift_the_template() {
+        let store = FuzzyStore::new();
+        let seed = store.identify(&full_probe(), 1_000);
+        let id = seed.visitor_id.clone();
+
+        let before = store.record(&id).unwrap();
+        assert_eq!(before.last_seen, 1_000);
+
+        // A probe agreeing on only the stable K1 subset plus cpu_cores scores
+        // in the review band: enough evidence to suspect `id`, not enough to
+        // confirm and drift it.
+        let review_probe = json!({
+            "webgl": "ANGLE (Intel)",
+            "platform": "Linux x86_64",
+            "timezone": "Asia/Shanghai",
+            "cpu_cores": 8,
+        });
+        let review = store.identify(&review_probe, 5_000);
+        assert_eq!(review.decision, Decision::Review);
+        assert_eq!(review.visitor_id, id);
+
+        // The template is untouched: same last_seen, components, and count.
+        let after = store.record(&id).unwrap();
+        assert_eq!(
+            after.last_seen, before.last_seen,
+            "review must not drift last_seen"
+        );
+        assert_eq!(after.observation_count, before.observation_count);
+        assert_eq!(after.components, before.components);
+
+        // Bracket the gate: a genuine `≥ T_hi` match DOES advance the template.
+        let confirm = store.identify(&full_probe(), 9_000);
+        assert_eq!(confirm.decision, Decision::Match);
+        assert_eq!(store.record(&id).unwrap().last_seen, 9_000);
+    }
 }
