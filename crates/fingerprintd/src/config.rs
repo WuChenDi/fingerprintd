@@ -25,6 +25,15 @@ pub struct Config {
     /// Lifetime, in seconds, of a challenge nonce before it expires. Reported
     /// to clients as `expires_in`; overridable via `FINGERPRINTD_NONCE_TTL_SECS`.
     pub nonce_ttl_secs: u64,
+    /// Whether to trust edge-injected passive-signal headers (`CF-Connecting-IP`,
+    /// `cf-bot-management-ja4`). Enable **only** when the service sits behind a
+    /// trusted edge (Cloudflare) that injects these headers and an origin IP
+    /// allowlist rejects direct client connections (PRD §4.2). Left `false` by
+    /// default (fail-closed): a directly-reachable origin must not trust
+    /// client-supplied copies of these headers, or a client could self-inject a
+    /// browser-looking JA4 to forge consistency. Overridable via
+    /// `FINGERPRINTD_TRUST_EDGE_HEADERS`.
+    pub trust_edge_headers: bool,
 }
 
 impl Default for Config {
@@ -32,6 +41,7 @@ impl Default for Config {
         Self {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
             nonce_ttl_secs: 30,
+            trust_edge_headers: false,
         }
     }
 }

@@ -12,19 +12,24 @@ pub mod config;
 pub mod fingerprint;
 pub mod fuzzy;
 pub mod nonce;
+pub mod signals;
 pub mod state;
 
 use axum::{
     Json, Router,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{nonce::NonceOutcome, state::AppState};
+use crate::{
+    nonce::NonceOutcome,
+    signals::{PassiveSignals, StaticIpIntel},
+    state::AppState,
+};
 
 /// Build the application router with shared [`AppState`].
 ///
@@ -67,10 +72,39 @@ async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
 /// `401` before any matching runs. On success the response carries the resolved
 /// `visitorId` and the weighted engine's computed `confidence`, decision, and
 /// collision flag (design §5/§6).
-async fn identify(State(state): State<AppState>, Json(req): Json<IdentifyRequest>) -> Response {
+///
+/// The `headers` are read for the edge-injected passive signals (real client IP
+/// and TLS JA4, PRD §4.2). They fuse into `confidence` **only** — never the
+/// `visitorId` — and are trusted only behind a trusted edge (see
+/// [`AppState::trust_edge_headers`]); a directly-reachable origin ignores any
+/// client-supplied copy.
+async fn identify(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<IdentifyRequest>,
+) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
             let outcome = state.matcher.identify(&req.stable_components, now_ms());
+
+            // Cross-check the client-reported UA against the unforgeable
+            // edge-observed TLS stack / IP. Trust edge headers only behind a
+            // trusted edge; otherwise ignore any client-supplied copy (PRD §4.2
+            // trusted-header requirement) — an untrusted request auto-degrades.
+            let intel = StaticIpIntel::new();
+            let claimed_ua = claimed_ua(&req.stable_components);
+            let empty = HeaderMap::new();
+            let trusted_headers = if state.trust_edge_headers {
+                &headers
+            } else {
+                &empty
+            };
+            let signals = signals::extract(trusted_headers, claimed_ua, &intel);
+
+            // Fuse the passive adjustment into confidence, clamped to [0, 1]
+            // (design §6). The visitorId and decision are unchanged.
+            let confidence = (outcome.confidence + signals.confidence_adjustment()).clamp(0.0, 1.0);
+
             tracing::debug!(
                 visitor_id = %outcome.visitor_id,
                 is_new_device = outcome.is_new_device,
@@ -78,16 +112,19 @@ async fn identify(State(state): State<AppState>, Json(req): Json<IdentifyRequest
                 score = ?outcome.score,
                 compared = outcome.compared_components,
                 collision_risk = outcome.collision_risk,
-                confidence = outcome.confidence,
+                base_confidence = outcome.confidence,
+                confidence,
+                tls_consistency = signals.tls_consistency.as_str(),
+                ip_risk = signals.ip_risk.as_str(),
                 "identified device",
             );
             Json(IdentifyResponse {
                 visitor_id: outcome.visitor_id,
-                confidence: outcome.confidence,
+                confidence,
                 is_new_device: outcome.is_new_device,
                 decision: outcome.decision.as_str(),
                 collision_risk: outcome.collision_risk,
-                signals: Signals::stub(),
+                signals: Signals::from(signals),
             })
             .into_response()
         }
@@ -96,6 +133,16 @@ async fn identify(State(state): State<AppState>, Json(req): Json<IdentifyRequest
             StatusCode::UNAUTHORIZED.into_response()
         }
     }
+}
+
+/// Extract the client-reported user agent from the stable components, trying the
+/// common key spellings. This is the JS/UA-claimed browser the passive TLS
+/// cross-check tests for forgery (signals §4.2); it is deliberately taken from
+/// the client-reported body, not a trusted source.
+fn claimed_ua(components: &Value) -> Option<&str> {
+    ["userAgent", "user_agent", "ua"]
+        .iter()
+        .find_map(|k| components.get(k).and_then(Value::as_str))
 }
 
 /// Current Unix time in milliseconds, saturating to `0` before the epoch — the
@@ -169,12 +216,13 @@ struct IdentifyResponse {
     /// Set when a runner-up candidate also cleared the match threshold within
     /// the collision margin (design §5.4).
     collision_risk: bool,
-    /// Risk signals for downstream consumers (static stub; passive signals P2).
+    /// Passive network-signal risk summary for downstream consumers (PRD §5).
     signals: Signals,
 }
 
-/// Risk signals surfaced to consumers. P0 emits a fixed stub — passive signal
-/// collection (JA3/JA4/IP, UA/TLS consistency) is P2.
+/// Passive-signal risk summary surfaced to consumers (PRD §5): the UA/TLS
+/// consistency verdict and the coarse IP reputation band, derived from the
+/// edge-observed signals (`crate::signals`).
 #[derive(Debug, Serialize)]
 struct Signals {
     /// Whether the UA and TLS fingerprint agree.
@@ -183,12 +231,11 @@ struct Signals {
     ip_risk: &'static str,
 }
 
-impl Signals {
-    /// The P0 placeholder signal set.
-    fn stub() -> Self {
+impl From<PassiveSignals> for Signals {
+    fn from(signals: PassiveSignals) -> Self {
         Self {
-            ua_tls_consistent: true,
-            ip_risk: "low",
+            ua_tls_consistent: signals.tls_consistency.ua_tls_consistent(),
+            ip_risk: signals.ip_risk.as_str(),
         }
     }
 }
@@ -232,6 +279,26 @@ mod tests {
                     .body(Body::from(body.to_string()))
                     .unwrap(),
             )
+            .await
+            .unwrap()
+    }
+
+    /// POST `/identify` with a JSON body and extra request headers.
+    async fn post_identify_headers(
+        router: &Router,
+        body: Value,
+        headers: &[(&str, &str)],
+    ) -> axum::response::Response {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/identify")
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        router
+            .clone()
+            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
             .await
             .unwrap()
     }
@@ -314,6 +381,7 @@ mod tests {
             nonce_store: store,
             matcher: Arc::new(crate::fuzzy::FuzzyStore::new()),
             nonce_ttl_secs: 30,
+            trust_edge_headers: false,
         };
         let router = build_router(state);
 
@@ -379,5 +447,110 @@ mod tests {
         let third = identify_with(&router, other).await;
         assert_ne!(third["visitorId"], first["visitorId"]);
         assert_eq!(third["is_new_device"], json!(true));
+    }
+
+    // --- Passive-signal fusion (T7 / design §6, PRD §4.2) ---
+
+    use crate::signals::{CF_CONNECTING_IP, JA4_HEADER};
+
+    /// A JA4 whose structural counts read as a real browser (15 ciphers, 16 ext).
+    const BROWSER_JA4: &str = "t13d1516h2_8daaf6152771_02713d6af862";
+    /// A JA4 whose structural counts read as a minimal automation stack (3/4).
+    const AUTOMATION_JA4: &str = "t13d0304h1_aaaaaaaaaaaa_bbbbbbbbbbbb";
+    /// A spoofed browser UA (headless automation self-reporting Chrome).
+    const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0";
+
+    /// Build a router whose state trusts (or not) edge-injected headers.
+    fn router_with_trust(trust_edge_headers: bool) -> Router {
+        build_router(AppState::from_config(&Config {
+            trust_edge_headers,
+            ..Config::default()
+        }))
+    }
+
+    /// Identify a fixed single-device probe (claimed UA = Chrome) on a **fresh**
+    /// router with the given trust setting and edge headers, returning the body.
+    ///
+    /// A fresh store per call keeps the probe a first-ever new device, so the
+    /// engine's base confidence is identical across calls and only the passive
+    /// fusion differs — letting the tests compare adjustments directly.
+    async fn identify_signals(trust_edge_headers: bool, headers: &[(&str, &str)]) -> Value {
+        let router = router_with_trust(trust_edge_headers);
+        let nonce = fresh_nonce(&router).await;
+        let body = json!({
+            "nonce": nonce,
+            "ts": 1,
+            "stable_components": { "userAgent": CHROME_UA },
+        });
+        json_body(post_identify_headers(&router, body, headers).await).await
+    }
+
+    /// Read the `confidence` field as an `f64`.
+    fn confidence(body: &Value) -> f64 {
+        body["confidence"].as_f64().unwrap()
+    }
+
+    #[tokio::test]
+    async fn passive_consistent_ua_tls_boosts_confidence() {
+        // Baseline: trusted edge but Bot Management absent → degraded (neutral).
+        let base = identify_signals(true, &[(CF_CONNECTING_IP, "198.51.100.7")]).await;
+        // A browser JA4 consistent with the Chrome UA lifts confidence.
+        let boosted = identify_signals(
+            true,
+            &[
+                (CF_CONNECTING_IP, "198.51.100.7"),
+                (JA4_HEADER, BROWSER_JA4),
+            ],
+        )
+        .await;
+        assert!(confidence(&boosted) > confidence(&base));
+        assert_eq!(boosted["signals"]["ua_tls_consistent"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn passive_ua_tls_mismatch_downgrades_confidence() {
+        // Baseline: no JA4 → degraded (neutral).
+        let base = identify_signals(true, &[]).await;
+        // Chrome UA riding a minimal automation TLS stack → strong downgrade.
+        let downgraded = identify_signals(true, &[(JA4_HEADER, AUTOMATION_JA4)]).await;
+        assert!(confidence(&downgraded) < confidence(&base));
+        assert_eq!(downgraded["signals"]["ua_tls_consistent"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn absent_ja4_degrades_gracefully_without_penalty() {
+        // Bot Management absent (no JA4 header) behind a trusted edge.
+        let degraded = identify_signals(true, &[(CF_CONNECTING_IP, "198.51.100.7")]).await;
+        let mismatched = identify_signals(true, &[(JA4_HEADER, AUTOMATION_JA4)]).await;
+        let boosted = identify_signals(true, &[(JA4_HEADER, BROWSER_JA4)]).await;
+
+        // Neutral: strictly above a forgery downgrade, strictly below a boost —
+        // a missing connection signal neither penalises nor rewards (§4.2).
+        assert!(confidence(&degraded) > confidence(&mismatched));
+        assert!(confidence(&degraded) < confidence(&boosted));
+        // Still a clean success, and degrade is not flagged as an inconsistency.
+        assert_eq!(degraded["is_new_device"], json!(true));
+        assert_eq!(degraded["signals"]["ua_tls_consistent"], json!(true));
+        assert_eq!(degraded["signals"]["ip_risk"], json!("low"));
+    }
+
+    #[tokio::test]
+    async fn client_supplied_edge_headers_are_ignored_when_untrusted() {
+        // A direct client self-injects a browser-looking JA4 and a datacenter IP
+        // to forge consistency and a clean IP band.
+        let forged = &[(CF_CONNECTING_IP, "34.120.5.6"), (JA4_HEADER, BROWSER_JA4)];
+
+        // Default (untrusted) origin: the client-supplied headers are ignored.
+        let untrusted = identify_signals(false, forged).await;
+        // The same headers behind a trusted edge would boost and flag the IP.
+        let trusted = identify_signals(true, forged).await;
+
+        // No forged boost: the untrusted request stays at the degraded baseline.
+        assert!(confidence(&untrusted) < confidence(&trusted));
+        // The client IP header is ignored → band stays low (edge-trusted: high).
+        assert_eq!(untrusted["signals"]["ip_risk"], json!("low"));
+        assert_eq!(trusted["signals"]["ip_risk"], json!("high"));
+        // The forged JA4 buys no evidence-based consistency (degrade default).
+        assert_eq!(untrusted["signals"]["ua_tls_consistent"], json!(true));
     }
 }
