@@ -23,6 +23,12 @@ export type { ClientOptions, FetchLike, IdentifyResult } from './client'
 export { getChallenge, identify } from './client'
 export type { Collected, Collector } from './collect'
 export { stubCollector } from './collect'
+export type {
+  BotdDetector,
+  FingerprintAgent,
+  FingerprintCollectorDeps,
+} from './fingerprint'
+export { createFingerprintCollector } from './fingerprint'
 export {
   SIGNATURE_HEADER,
   SIGNATURE_TIMESTAMP_HEADER,
