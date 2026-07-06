@@ -1,0 +1,363 @@
+//! In-memory storage layer for the weighted fuzzy-matching engine
+//! (design-fuzzy-matching.md §3/§4/§9/§11).
+//!
+//! This is the storage substrate only — it holds the data model, the blocking
+//! indexes for candidate generation, and the frequency material for parameter
+//! estimation. It is deliberately **additive**: the P0 `/identify` exact-match
+//! path is untouched, and the two-stage scoring/judgment (design §5) is out of
+//! scope here.
+//!
+//! Pieces, mapped to the design's data-structure table (§11):
+//! - [`component`] — salted, compliance-preserving stored representations (§3)
+//!   and the cold-start stability priors (§2/§9).
+//! - [`frequency`] — `value hash → count`, the material for `u_i` (§9).
+//! - [`blocking`] — the `key → set<visitorId>` inverted index (§4).
+//! - [`minhash`] — `MinHash`-`LSH` band keys for set components (§4 K3).
+//! - [`record`] — the `visitorId → template` fingerprint library (§3).
+//!
+//! [`FuzzyStore`] wires them together: [`FuzzyStore::observe`] folds a raw
+//! component observation into every index, and [`FuzzyStore::candidates`]
+//! performs stage-one recall.
+
+pub mod blocking;
+pub mod component;
+pub mod frequency;
+pub mod minhash;
+pub mod record;
+
+use std::collections::{BTreeMap, HashSet};
+
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+use self::{
+    blocking::{BlockingIndex, BlockingKey},
+    component::{Salt, Stability, Stored},
+    frequency::FrequencyTable,
+    minhash::MinHashLsh,
+    record::{FingerprintRecord, RecordStore},
+};
+
+/// Aggregate in-memory store tying the record library, blocking indexes, and
+/// frequency table together behind one observe/candidates surface.
+#[derive(Debug)]
+pub struct FuzzyStore {
+    /// Per-instance salt applied to every stored value.
+    salt: Salt,
+    /// The `visitorId → template` fingerprint library (§3).
+    records: RecordStore,
+    /// The `key → set<visitorId>` blocking inverted index (§4).
+    blocking: BlockingIndex,
+    /// `MinHash`-`LSH` band-key generator for set components (§4 K3).
+    minhash: MinHashLsh,
+    /// Per-value frequency material for `u_i` estimation (§9).
+    frequency: FrequencyTable,
+}
+
+impl Default for FuzzyStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FuzzyStore {
+    /// Build an empty store with a fresh random salt and permutation family.
+    pub fn new() -> Self {
+        Self {
+            salt: Salt::random(),
+            records: RecordStore::new(),
+            blocking: BlockingIndex::new(),
+            minhash: MinHashLsh::new(),
+            frequency: FrequencyTable::new(),
+        }
+    }
+
+    /// Fold a raw component observation for `visitor` into every index.
+    ///
+    /// Converts each recognized component to its stored form (updating the
+    /// frequency table for scalar values), upserts the visitor's template with
+    /// `now_ms` (Unix milliseconds), and inserts the derived blocking keys.
+    /// Returns `true` when the visitor was newly recorded.
+    pub fn observe(&self, visitor: &str, components: &Value, now_ms: u64) -> bool {
+        let mut stored = BTreeMap::new();
+        for (name, value) in object_entries(components) {
+            let Some(value) = self.to_stored(name, value) else {
+                continue;
+            };
+            // Scalar values feed the frequency material for `u_i` (§9).
+            match &value {
+                Stored::Category(hash) => self.frequency.record(*hash),
+                Stored::Numeric(n) => self.frequency.record(self.salt.hash(&n.to_string())),
+                Stored::Set(_) => {}
+            }
+            stored.insert(name.clone(), value);
+        }
+
+        for key in self.blocking_keys(&stored) {
+            self.blocking.insert(key, visitor);
+        }
+        self.records.observe(visitor, stored, now_ms)
+    }
+
+    /// Stage-one candidate recall: the union of visitors sharing any blocking
+    /// key with `components` (design §4).
+    pub fn candidates(&self, components: &Value) -> HashSet<String> {
+        let mut stored = BTreeMap::new();
+        for (name, value) in object_entries(components) {
+            if let Some(value) = self.to_stored(name, value) {
+                stored.insert(name.clone(), value);
+            }
+        }
+        self.blocking.candidates(&self.blocking_keys(&stored))
+    }
+
+    /// Snapshot of a visitor's stored template.
+    pub fn record(&self, visitor: &str) -> Option<FingerprintRecord> {
+        self.records.get(visitor)
+    }
+
+    /// Frequency material, for `u_i` estimation by the (future) scorer.
+    pub fn frequency(&self) -> &FrequencyTable {
+        &self.frequency
+    }
+
+    /// The blocking index (exposes drop accounting and direct queries).
+    pub fn blocking(&self) -> &BlockingIndex {
+        &self.blocking
+    }
+
+    /// Convert one raw component value to its stored form per the schema.
+    ///
+    /// Returns `None` for a missing or type-mismatched value (design §8: a
+    /// missing component is simply not compared).
+    fn to_stored(&self, name: &str, value: &Value) -> Option<Stored> {
+        match classify(name).kind {
+            Kind::Category => canonical_scalar(value).map(|s| Stored::Category(self.salt.hash(&s))),
+            Kind::Numeric => value_to_i64(value).map(Stored::Numeric),
+            Kind::Set => value.as_array().map(|items| {
+                Stored::Set(self.salt.hash_set(items.iter().filter_map(Value::as_str)))
+            }),
+        }
+    }
+
+    /// Derive the blocking keys (K1, K2, and the `MinHash` bands) for a stored
+    /// component map (design §4). A composite key is emitted only when all of
+    /// its members are present, so recall relies on the union of independent keys.
+    fn blocking_keys(&self, stored: &BTreeMap<String, Stored>) -> Vec<BlockingKey> {
+        let mut keys = Vec::new();
+        if let Some(key) = group_key(stored, b"K1", &["webgl", "platform", "timezone"]) {
+            keys.push(key);
+        }
+        if let Some(key) = group_key(stored, b"K2", &["audio", "cpu_cores", "device_memory"]) {
+            keys.push(key);
+        }
+        if let Some(Stored::Set(fonts)) = stored.get("fonts") {
+            keys.extend(self.minhash.band_keys(fonts));
+        }
+        keys
+    }
+}
+
+/// A component's storage kind, driving how a raw value is represented (§3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Salted single-value hash.
+    Category,
+    /// Per-element salted hash set.
+    Set,
+    /// Bucketed integer.
+    Numeric,
+}
+
+/// Schema entry for one component name: its stored [`Kind`] (§3) and its
+/// [`Stability`] tier — the source of the `m_i` prior the scorer uses (§2/§9).
+#[derive(Debug, Clone, Copy)]
+pub struct FieldSpec {
+    /// Stability tier, source of the `m_i` prior (§2/§9).
+    pub stability: Stability,
+    /// How the value is stored (§3).
+    pub kind: Kind,
+}
+
+/// Classify a component name into its schema entry (design §2 component table).
+///
+/// Unknown names default to a medium-stability category value.
+pub fn classify(name: &str) -> FieldSpec {
+    let (stability, kind) = match name {
+        "webgl" | "platform" | "timezone" | "audio" | "languages" => {
+            (Stability::High, Kind::Category)
+        }
+        "cpu_cores" | "device_memory" => (Stability::High, Kind::Numeric),
+        "fonts" | "plugins" => (Stability::Medium, Kind::Set),
+        "screen" => (Stability::Medium, Kind::Numeric),
+        "user_agent" => (Stability::Low, Kind::Category),
+        // "canvas" and unknown names fall through to the medium-category default.
+        _ => (Stability::Medium, Kind::Category),
+    };
+    FieldSpec { stability, kind }
+}
+
+/// Iterate the object's entries, or nothing if `value` is not an object.
+fn object_entries(value: &Value) -> impl Iterator<Item = (&String, &Value)> {
+    value
+        .as_object()
+        .into_iter()
+        .flat_map(serde_json::Map::iter)
+}
+
+/// Canonicalize a scalar JSON value (string/bool/number) to a hashable string.
+fn canonical_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Bool(b) => Some(b.to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+/// Coerce a numeric JSON value to `i64`, rounding floats.
+#[allow(clippy::cast_possible_truncation)] // fingerprint numerics (cores, memory) are small
+fn value_to_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_f64().map(|f| f.round() as i64))
+}
+
+/// Length-prefixed digest of an ordered member group into one blocking key.
+///
+/// Returns `None` if any member is absent or is a set (sets recall via
+/// `MinHash` bands, not composite keys).
+fn group_key(
+    stored: &BTreeMap<String, Stored>,
+    namespace: &[u8],
+    members: &[&str],
+) -> Option<BlockingKey> {
+    let mut hasher = Sha256::new();
+    hasher.update(namespace);
+    for member in members {
+        let bytes = scalar_bytes(stored.get(*member)?)?;
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    Some(hasher.finalize().into())
+}
+
+/// Keying bytes for a scalar stored value; `None` for set components.
+fn scalar_bytes(stored: &Stored) -> Option<Vec<u8>> {
+    match stored {
+        Stored::Category(hash) => Some(hash.to_vec()),
+        Stored::Numeric(n) => Some(n.to_le_bytes().to_vec()),
+        Stored::Set(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FuzzyStore;
+    use serde_json::json;
+
+    /// A full high-stability probe that populates both K1 and K2 keys.
+    fn full_probe() -> serde_json::Value {
+        json!({
+            "webgl": "ANGLE (Intel)",
+            "platform": "Linux x86_64",
+            "timezone": "Asia/Shanghai",
+            "audio": "124.04",
+            "cpu_cores": 8,
+            "device_memory": 8,
+            "fonts": ["Arial", "Helvetica", "Courier", "Times", "Verdana"],
+            "user_agent": "Chrome/120",
+        })
+    }
+
+    #[test]
+    fn observe_populates_record_and_recalls_self() {
+        let store = FuzzyStore::new();
+        let probe = full_probe();
+        assert!(store.observe("v1", &probe, 1_000));
+
+        let record = store.record("v1").unwrap();
+        assert_eq!(record.observation_count, 1);
+        assert_eq!(record.first_seen, 1_000);
+        // The stored template keeps a value per recognized component.
+        assert!(record.components.contains_key("webgl"));
+        assert!(record.components.contains_key("fonts"));
+
+        // The same probe recalls the visitor via its blocking keys.
+        assert!(store.candidates(&probe).contains("v1"));
+    }
+
+    #[test]
+    fn recall_survives_a_changed_ua_and_one_font() {
+        let store = FuzzyStore::new();
+        store.observe("v1", &full_probe(), 1_000);
+
+        // Browser auto-upgraded (UA changed) and one font added: the high-stable
+        // K1/K2 keys are unchanged and MinHash still shares bands -> recalled.
+        let mut drifted = full_probe();
+        drifted["user_agent"] = json!("Chrome/121");
+        drifted["fonts"] = json!(["Arial", "Helvetica", "Courier", "Times", "Segoe"]);
+        assert!(store.candidates(&drifted).contains("v1"));
+    }
+
+    #[test]
+    fn unrelated_probe_is_not_recalled() {
+        let store = FuzzyStore::new();
+        store.observe("v1", &full_probe(), 1_000);
+
+        let other = json!({
+            "webgl": "Apple GPU",
+            "platform": "iPhone",
+            "timezone": "America/New_York",
+            "audio": "35.7",
+            "cpu_cores": 6,
+            "device_memory": 4,
+            "fonts": ["SF Pro", "Menlo", "Georgia", "Palatino"],
+            "user_agent": "Safari/17",
+        });
+        assert!(!store.candidates(&other).contains("v1"));
+    }
+
+    #[test]
+    fn frequency_tracks_category_values() {
+        let store = FuzzyStore::new();
+        store.observe("v1", &full_probe(), 1_000);
+        store.observe("v2", &full_probe(), 2_000);
+
+        // "Linux x86_64" seen twice for the platform component.
+        let hash = store.salt.hash("Linux x86_64");
+        assert_eq!(store.frequency().count(hash), 2);
+    }
+
+    #[test]
+    fn missing_components_are_skipped_not_stored() {
+        let store = FuzzyStore::new();
+        // canvas null (privacy browser) must not be stored as a matchable value.
+        store.observe("v1", &json!({ "webgl": "x", "canvas": null }), 1_000);
+        let record = store.record("v1").unwrap();
+        assert!(record.components.contains_key("webgl"));
+        assert!(!record.components.contains_key("canvas"));
+    }
+
+    #[test]
+    fn schema_maps_known_components() {
+        use super::{Kind, classify};
+        use crate::fuzzy::component::Stability;
+
+        assert_eq!(classify("user_agent").stability, Stability::Low);
+        assert_eq!(classify("webgl").stability, Stability::High);
+        assert_eq!(classify("fonts").kind, Kind::Set);
+        assert_eq!(classify("cpu_cores").kind, Kind::Numeric);
+        // Unknown -> medium-stability category default.
+        let unknown = classify("something_new");
+        assert_eq!(unknown.stability, Stability::Medium);
+        assert_eq!(unknown.kind, Kind::Category);
+    }
+
+    #[test]
+    fn non_object_probe_records_visitor_with_no_components() {
+        let store = FuzzyStore::new();
+        assert!(store.observe("v1", &json!("not-an-object"), 1_000));
+        assert!(store.record("v1").unwrap().components.is_empty());
+    }
+}
