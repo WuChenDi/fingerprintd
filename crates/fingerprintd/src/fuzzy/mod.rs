@@ -21,9 +21,12 @@
 
 pub mod blocking;
 pub mod component;
+pub mod engine;
 pub mod frequency;
 pub mod minhash;
 pub mod record;
+
+pub use engine::{Decision, MatchOutcome};
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -79,18 +82,14 @@ impl FuzzyStore {
     /// `now_ms` (Unix milliseconds), and inserts the derived blocking keys.
     /// Returns `true` when the visitor was newly recorded.
     pub fn observe(&self, visitor: &str, components: &Value, now_ms: u64) -> bool {
-        let mut stored = BTreeMap::new();
-        for (name, value) in object_entries(components) {
-            let Some(value) = self.to_stored(name, value) else {
-                continue;
-            };
-            // Scalar values feed the frequency material for `u_i` (§9).
-            match &value {
+        let stored = self.stored_map(components);
+        // Scalar values feed the frequency material for `u_i` (§9).
+        for value in stored.values() {
+            match value {
                 Stored::Category(hash) => self.frequency.record(*hash),
                 Stored::Numeric(n) => self.frequency.record(self.salt.hash(&n.to_string())),
                 Stored::Set(_) => {}
             }
-            stored.insert(name.clone(), value);
         }
 
         for key in self.blocking_keys(&stored) {
@@ -102,13 +101,24 @@ impl FuzzyStore {
     /// Stage-one candidate recall: the union of visitors sharing any blocking
     /// key with `components` (design §4).
     pub fn candidates(&self, components: &Value) -> HashSet<String> {
+        let stored = self.stored_map(components);
+        self.blocking.candidates(&self.blocking_keys(&stored))
+    }
+
+    /// Convert a raw JSON component object into its stored-form map, dropping
+    /// missing or type-mismatched entries (design §8). Shared by [`observe`],
+    /// [`candidates`], and the stage-two scorer.
+    ///
+    /// [`observe`]: FuzzyStore::observe
+    /// [`candidates`]: FuzzyStore::candidates
+    fn stored_map(&self, components: &Value) -> BTreeMap<String, Stored> {
         let mut stored = BTreeMap::new();
         for (name, value) in object_entries(components) {
             if let Some(value) = self.to_stored(name, value) {
                 stored.insert(name.clone(), value);
             }
         }
-        self.blocking.candidates(&self.blocking_keys(&stored))
+        stored
     }
 
     /// Snapshot of a visitor's stored template.
@@ -145,6 +155,13 @@ impl FuzzyStore {
     /// its members are present, so recall relies on the union of independent keys.
     fn blocking_keys(&self, stored: &BTreeMap<String, Stored>) -> Vec<BlockingKey> {
         let mut keys = Vec::new();
+        // K0 — catch-all over every present scalar value, so two probes whose
+        // scalar components are byte-identical always recall each other (the
+        // exact-match subset). Fragile by design; recall of *drifted* probes
+        // relies on the independent K1/K2/font keys below (design §4 redundancy).
+        if let Some(key) = all_scalar_key(stored) {
+            keys.push(key);
+        }
         if let Some(key) = group_key(stored, b"K1", &["webgl", "platform", "timezone"]) {
             keys.push(key);
         }
@@ -240,6 +257,29 @@ fn group_key(
         hasher.update(&bytes);
     }
     Some(hasher.finalize().into())
+}
+
+/// Length-prefixed digest of every present scalar component into one catch-all
+/// blocking key (K0). Returns `None` when the map holds no scalar value (only
+/// sets, or nothing), since there is then no scalar identity to key on.
+///
+/// Names are folded in alongside values (the map iterates in sorted name order)
+/// so two probes collide here only when their scalar components match exactly.
+fn all_scalar_key(stored: &BTreeMap<String, Stored>) -> Option<BlockingKey> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"K0");
+    let mut any = false;
+    for (name, value) in stored {
+        let Some(bytes) = scalar_bytes(value) else {
+            continue;
+        };
+        any = true;
+        hasher.update((name.len() as u64).to_le_bytes());
+        hasher.update(name.as_bytes());
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    any.then(|| hasher.finalize().into())
 }
 
 /// Keying bytes for a scalar stored value; `None` for set components.
