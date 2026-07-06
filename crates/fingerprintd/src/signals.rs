@@ -51,6 +51,13 @@ const BROWSER_MIN_CIPHERS: u32 = 10;
 /// automation stacks carry far fewer.
 const BROWSER_MIN_EXTENSIONS: u32 = 10;
 
+/// Confidence boost when the UA claim and the observed TLS stack agree — a small
+/// positive nudge toward "real browser" (design §6, "一致 → 加成").
+const CONSISTENT_BOOST: f64 = 0.05;
+/// Confidence penalty when the UA claim contradicts the observed TLS stack — the
+/// strong anti-forgery downgrade (design §6 / PRD §4.2, "不一致 → 大幅下调").
+const MISMATCH_PENALTY: f64 = 0.5;
+
 /// Coarse IP reputation band surfaced to downstream risk consumers (PRD §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpRisk {
@@ -119,6 +126,27 @@ pub struct PassiveSignals {
     pub ip_risk: IpRisk,
     /// UA-vs-TLS-stack cross-check verdict.
     pub tls_consistency: TlsConsistency,
+}
+
+impl PassiveSignals {
+    /// The passive-signal confidence adjustment fused into `/identify` confidence
+    /// (design §6). The caller adds this to the engine's base confidence and
+    /// clamps to `[0, 1]`; positive boosts, negative downgrades.
+    ///
+    /// Only the UA-vs-TLS consistency verdict moves confidence: agreement gives a
+    /// small [`CONSISTENT_BOOST`], an outright [`TlsConsistency::Mismatch`] gives
+    /// the strong [`MISMATCH_PENALTY`] downgrade (the anti-forgery core, PRD §4.2),
+    /// and a [`TlsConsistency::Degraded`] read is neutral — a missing connection
+    /// signal never penalises (auto-degrade, §4.2). The [`IpRisk`] band is
+    /// auxiliary and surfaced to downstream risk consumers (§5), not folded into
+    /// confidence.
+    pub fn confidence_adjustment(self) -> f64 {
+        match self.tls_consistency {
+            TlsConsistency::Consistent => CONSISTENT_BOOST,
+            TlsConsistency::Mismatch => -MISMATCH_PENALTY,
+            TlsConsistency::Degraded => 0.0,
+        }
+    }
 }
 
 /// Coarse client-stack family, inferred independently from a UA string and from a
@@ -453,6 +481,25 @@ mod tests {
         assert_eq!(classify_ja4(AUTOMATION_JA4), ClientStack::Automation);
         // Too short to hold the count fields.
         assert_eq!(classify_ja4("t13d"), ClientStack::Unknown);
+    }
+
+    #[test]
+    fn confidence_adjustment_boosts_consistent_penalises_mismatch_neutral_degrade() {
+        let mk = |ip, c| PassiveSignals {
+            ip_risk: ip,
+            tls_consistency: c,
+        };
+        let boost = mk(IpRisk::Low, TlsConsistency::Consistent).confidence_adjustment();
+        let penalty = mk(IpRisk::Low, TlsConsistency::Mismatch).confidence_adjustment();
+        let degrade = mk(IpRisk::Low, TlsConsistency::Degraded).confidence_adjustment();
+        assert!(boost > 0.0);
+        assert!(penalty < 0.0);
+        assert!(degrade.abs() < f64::EPSILON); // neutral
+        // The mismatch downgrade dominates the consistency boost (anti-forgery core).
+        assert!(penalty.abs() > boost);
+        // The IP band is auxiliary — it never moves the adjustment.
+        let degrade_high_ip = mk(IpRisk::High, TlsConsistency::Degraded).confidence_adjustment();
+        assert!((degrade - degrade_high_ip).abs() < f64::EPSILON);
     }
 
     #[test]

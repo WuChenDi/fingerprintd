@@ -18,6 +18,10 @@ pub struct AppState {
     pub matcher: Arc<FuzzyStore>,
     /// Nonce lifetime advertised to clients as `expires_in`.
     pub nonce_ttl_secs: u64,
+    /// Whether edge-injected passive-signal headers are trusted (PRD §4.2). When
+    /// `false`, `/identify` ignores client-supplied `CF-Connecting-IP` /
+    /// `cf-bot-management-ja4` copies (fail-closed).
+    pub trust_edge_headers: bool,
 }
 
 impl AppState {
@@ -28,6 +32,7 @@ impl AppState {
             nonce_store: Arc::new(InMemoryNonceStore::new(ttl)),
             matcher: Arc::new(FuzzyStore::new()),
             nonce_ttl_secs: config.nonce_ttl_secs,
+            trust_edge_headers: config.trust_edge_headers,
         }
     }
 }
@@ -37,6 +42,7 @@ impl fmt::Debug for AppState {
         // `dyn NonceStore` is not `Debug`; expose only the plain field.
         f.debug_struct("AppState")
             .field("nonce_ttl_secs", &self.nonce_ttl_secs)
+            .field("trust_edge_headers", &self.trust_edge_headers)
             .finish_non_exhaustive()
     }
 }
