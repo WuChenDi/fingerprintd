@@ -22,12 +22,16 @@ const ENV_PREFIX: &str = "FINGERPRINTD_";
 pub struct Config {
     /// Socket address the HTTP server binds to.
     pub bind_addr: SocketAddr,
+    /// Lifetime, in seconds, of a challenge nonce before it expires. Reported
+    /// to clients as `expires_in`; overridable via `FINGERPRINTD_NONCE_TTL_SECS`.
+    pub nonce_ttl_secs: u64,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            nonce_ttl_secs: 30,
         }
     }
 }
