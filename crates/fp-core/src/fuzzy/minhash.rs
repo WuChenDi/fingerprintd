@@ -9,6 +9,7 @@
 
 use std::collections::BTreeSet;
 
+#[cfg(feature = "rng")]
 use rand::{RngCore, rng};
 use sha2::{Digest, Sha256};
 
@@ -34,6 +35,7 @@ pub struct MinHashLsh {
     coefficients: [(u64, u64); NUM_PERM],
 }
 
+#[cfg(feature = "rng")]
 impl Default for MinHashLsh {
     fn default() -> Self {
         Self::new()
@@ -42,12 +44,35 @@ impl Default for MinHashLsh {
 
 impl MinHashLsh {
     /// Build an index with a fresh random permutation family.
+    #[cfg(feature = "rng")]
     pub fn new() -> Self {
         let mut rng = rng();
         let mut coefficients = [(0u64, 0u64); NUM_PERM];
         for slot in &mut coefficients {
             // Force `a` odd so `a·x + b` is a bijection over the `u64` ring.
             *slot = (rng.next_u64() | ODD_MASK, rng.next_u64());
+        }
+        Self { coefficients }
+    }
+
+    /// Build an index with a **deterministic** permutation family derived from
+    /// `seed`.
+    ///
+    /// The random [`MinHashLsh::new`] family differs per instance, which breaks
+    /// set recall for a stateless edge deployment where band keys are persisted
+    /// and re-derived across isolates. Seeding makes the family reproducible:
+    /// each permutation's `(a, b)` is read from `SHA-256(seed || index)`, with
+    /// `a` forced odd so `a·x + b` stays a bijection over the `u64` ring.
+    pub fn from_seed(seed: &[u8]) -> Self {
+        let mut coefficients = [(0u64, 0u64); NUM_PERM];
+        for (index, slot) in coefficients.iter_mut().enumerate() {
+            let mut hasher = Sha256::new();
+            hasher.update(seed);
+            hasher.update((index as u64).to_le_bytes());
+            let digest = hasher.finalize();
+            let a = u64::from_le_bytes(digest[..8].try_into().unwrap_or_default()) | ODD_MASK;
+            let b = u64::from_le_bytes(digest[8..16].try_into().unwrap_or_default());
+            *slot = (a, b);
         }
         Self { coefficients }
     }

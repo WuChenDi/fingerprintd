@@ -196,12 +196,10 @@ dependencies = [
 name = "fingerprintd"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "axum",
  "figment",
+ "fp-core",
  "hex",
- "hmac",
- "rand",
  "serde",
  "serde_json",
  "sha2",
@@ -212,11 +210,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "fp-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "hmac",
+ "rand",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fp-wasm"
 version = "0.1.0"
 dependencies = [
+ "fp-core",
  "hex",
  "hmac",
+ "serde",
+ "serde_json",
  "sha2",
  "wasm-bindgen",
 ]

@@ -1,32 +1,51 @@
-//! `fp-wasm` — the client-side nonce probe core, compiled to WebAssembly.
+//! `fp-wasm` — the fingerprinting compute compiled to WebAssembly.
 //!
-//! A probe-capable browser collector calls [`probe`] with the one-time nonce
-//! advertised by `GET /challenge` and echoes the result on `POST /identify`.
-//! The transform is byte-for-byte identical to the server verifier
-//! (`crates/fingerprintd/src/probe.rs`, `ProbeVerifier::expected_hex`):
+//! This crate exposes two WASM surfaces backed by [`fp_core`]:
 //!
-//! ```text
-//! probe(nonce) = hex(HMAC-SHA256(key, nonce))
-//! ```
+//! - The **browser-collector probe** ([`probe`]): a probe-capable browser
+//!   collector calls it with the one-time nonce advertised by `GET /challenge`
+//!   and echoes the result on `POST /identify`. The transform is byte-for-byte
+//!   identical to the server verifier (`crates/fp-core/src/probe.rs`,
+//!   `ProbeVerifier::expected_hex`):
 //!
-//! matching the advertised `PROBE_ALG = "HMAC-SHA256"`, `PROBE_INPUT = "nonce"`,
-//! `PROBE_ENCODING = "hex"`. The parity proof is the native `#[cfg(test)]`
-//! vector below — it reproduces the server's `expected_probe` output with the
-//! shared test secret, so server/client agreement is verified without a browser.
+//!   ```text
+//!   probe(nonce) = hex(HMAC-SHA256(key, nonce))
+//!   ```
+//!
+//!   matching the advertised `PROBE_ALG = "HMAC-SHA256"`, `PROBE_INPUT =
+//!   "nonce"`, `PROBE_ENCODING = "hex"`. The parity proof is the native
+//!   `#[cfg(test)]` vector below — it reproduces the server's `expected_probe`
+//!   output with the shared test secret, so server/client agreement is verified
+//!   without a browser.
+//!
+//! - The **server-side edge engine** ([`FpEngine`]): the pure compute a stateless
+//!   Cloudflare Worker host (`workers/edge`, a later step) runs for a `/identify`
+//!   request — blocking-key derivation, Fellegi–Sunter scoring, probe
+//!   verification, and response signing — while the host owns the I/O (nonce
+//!   Durable Object, D1 candidate index) around it. Every method delegates to
+//!   [`fp_core`], so the Worker and the native Axum server share one
+//!   implementation.
 //!
 //! ## Embedded key — depth, not a hard lock
 //!
-//! The probe key is baked into this module at build time ([`PROBE_KEY`], overridable
-//! via the `FP_PROBE_KEY` compile-time env var). Because it ships inside the
-//! `.wasm` artifact, a determined attacker can extract it — this is **defense in
-//! depth, not a decisive control** (PRD: "WASM 纵深防御，非决定性"). The one-time
-//! nonce remains the primary anti-replay guarantee; the probe only raises the bar
-//! against blind replay. In a real deployment the build injects the same secret
-//! configured as the server's `probe_key`.
+//! The browser-collector probe key is baked into this module at build time
+//! ([`PROBE_KEY`], overridable via the `FP_PROBE_KEY` compile-time env var).
+//! Because it ships inside the `.wasm` artifact, a determined attacker can
+//! extract it — this is **defense in depth, not a decisive control** (PRD: "WASM
+//! 纵深防御，非决定性"). The one-time nonce remains the primary anti-replay
+//! guarantee; the probe only raises the bar against blind replay. In a real
+//! deployment the build injects the same secret configured as the server's
+//! `probe_key`. The server-side [`FpEngine`] instead takes its keys at runtime
+//! (Worker Secrets), never embedding them.
 
+use fp_core::fuzzy::FuzzyStore;
+use fp_core::probe::ProbeVerifier;
+use fp_core::signing::ResponseSigner;
 use hmac::{Hmac, Mac};
+use serde::Deserialize;
+use serde_json::{Value, json};
 use sha2::Sha256;
-use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::prelude::{JsError, wasm_bindgen};
 
 /// The probe HMAC key embedded at build time.
 ///
@@ -60,13 +79,184 @@ pub fn probe(nonce: &str) -> String {
     probe_with_key(PROBE_KEY.as_bytes(), nonce).unwrap_or_default()
 }
 
+/// Server-side edge compute, configured with a deployment's secrets.
+///
+/// A Cloudflare Worker host constructs one `FpEngine` per isolate from its
+/// Worker Secrets and calls it for the pure compute of a `/identify` request. It
+/// holds no request state: [`FpEngine::score`] rebuilds the recalled candidate
+/// block in a transient store per call and discards it, leaving persistence to
+/// the host.
+#[wasm_bindgen]
+pub struct FpEngine {
+    /// Secret seeding the deterministic salt + `MinHash` family, so blocking keys
+    /// and stored hashes are stable across isolates.
+    salt_secret: Vec<u8>,
+    /// Verifier for the client nonce probe (server role).
+    probe: ProbeVerifier,
+    /// Signer for `/identify` response bodies.
+    signer: ResponseSigner,
+}
+
+#[wasm_bindgen]
+impl FpEngine {
+    /// Construct an engine from the deployment's configured secrets.
+    ///
+    /// `salt_secret` seeds the deterministic salt and `MinHash` family so
+    /// blocking keys and stored hashes are reproducible across isolates;
+    /// `probe_key` is the pre-shared nonce-probe key; `signing_key` signs
+    /// response bodies. In a real deployment all three are Worker Secrets.
+    #[wasm_bindgen(constructor)]
+    pub fn new(salt_secret: &str, probe_key: &str, signing_key: &str) -> FpEngine {
+        FpEngine {
+            salt_secret: salt_secret.as_bytes().to_vec(),
+            probe: ProbeVerifier::new(probe_key.as_bytes()),
+            signer: ResponseSigner::new(signing_key.as_bytes()),
+        }
+    }
+
+    /// Blocking keys for a probe's `components`, as a JSON array of hex strings.
+    ///
+    /// `components_json` is the raw component object from `POST /identify`; the
+    /// host queries its candidate index (D1) with the returned keys. Invalid JSON
+    /// surfaces as a thrown JS exception.
+    pub fn blocking_keys(&self, components_json: &str) -> Result<String, JsError> {
+        self.blocking_keys_impl(components_json)
+            .map_err(|e| JsError::new(&e))
+    }
+
+    /// Score a probe against host-supplied candidates and return the verdict as
+    /// JSON, **without** mutating any state.
+    ///
+    /// `request_json` is `{ "components": {..}, "candidates": [{ "visitor_id":
+    /// "..", "components": {..} }, ..] }` — the recalled candidate templates the
+    /// host fetched from D1. The reply is
+    /// `{ "visitor_id", "is_new_device", "decision", "confidence", "score",
+    /// "compared_components", "collision_risk" }` (see [`fp_core`]'s
+    /// `MatchOutcome`). The host applies its own persistence per the returned
+    /// `decision` (drift a match, mint a new device, leave a review untouched).
+    ///
+    /// `u_i` rarity is estimated over the supplied candidate block, a local
+    /// approximation of the native server's global frequency table; a global
+    /// frequency snapshot is a later (D1) refinement. Invalid JSON surfaces as a
+    /// thrown JS exception.
+    pub fn score(&self, request_json: &str) -> Result<String, JsError> {
+        self.score_impl(request_json).map_err(|e| JsError::new(&e))
+    }
+
+    /// Expected probe `hex(HMAC-SHA256(probe_key, nonce))` for `nonce` — the
+    /// value a probe-capable client should echo, computed with the configured
+    /// key. Fails closed to an empty string on the unreachable keying error.
+    pub fn expected_probe(&self, nonce: &str) -> String {
+        self.probe.expected_hex(nonce).unwrap_or_default()
+    }
+
+    /// Constant-time check that `candidate_hex` is the correct probe for `nonce`.
+    /// A missing, malformed, or wrong probe fails closed to `false`.
+    pub fn verify_probe(&self, nonce: &str, candidate_hex: &str) -> bool {
+        self.probe.verify(nonce, candidate_hex)
+    }
+
+    /// Sign a response body: `hex(HMAC-SHA256(signing_key, issued_ms_be ++ body))`,
+    /// carried in the `x-fp-signature` header alongside `x-fp-timestamp`.
+    /// `issued_ms` is the server's issue time in Unix milliseconds. Fails closed
+    /// to an empty string on the unreachable keying error.
+    pub fn sign(&self, issued_ms: u64, body: &[u8]) -> String {
+        self.signer.sign(issued_ms, body).unwrap_or_default()
+    }
+}
+
+impl FpEngine {
+    /// A fresh transient store seeded from the configured salt secret. Every
+    /// per-request compute call builds one so the probe and candidate templates
+    /// are salted identically and reproducibly.
+    fn store(&self) -> FuzzyStore {
+        FuzzyStore::deterministic(&self.salt_secret)
+    }
+
+    /// Native-testable core of [`FpEngine::blocking_keys`], erroring as a plain
+    /// `String` so tests need not touch `JsError`.
+    fn blocking_keys_impl(&self, components_json: &str) -> Result<String, String> {
+        let components: Value = serde_json::from_str(components_json)
+            .map_err(|e| format!("invalid components JSON: {e}"))?;
+        let keys = self.store().blocking_key_hexes(&components);
+        serde_json::to_string(&keys).map_err(|e| e.to_string())
+    }
+
+    /// Native-testable core of [`FpEngine::score`], erroring as a plain `String`.
+    fn score_impl(&self, request_json: &str) -> Result<String, String> {
+        let request: ScoreRequest = serde_json::from_str(request_json)
+            .map_err(|e| format!("invalid score request JSON: {e}"))?;
+        let store = self.store();
+        // Rebuild the recalled block in the transient store so the probe and
+        // every candidate template are salted identically; the store is discarded
+        // after scoring, leaving host state to the caller. The timestamp is
+        // irrelevant to scoring (it only stamps record freshness), so use 0.
+        for candidate in &request.candidates {
+            store.observe(&candidate.visitor_id, &candidate.components, 0);
+        }
+        let outcome = store.score(&request.components);
+        let reply = json!({
+            "visitor_id": outcome.visitor_id,
+            "is_new_device": outcome.is_new_device,
+            "decision": outcome.decision.as_str(),
+            "confidence": outcome.confidence,
+            "score": outcome.score,
+            "compared_components": outcome.compared_components,
+            "collision_risk": outcome.collision_risk,
+        });
+        Ok(reply.to_string())
+    }
+}
+
+impl core::fmt::Debug for FpEngine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Never leak the salt secret or the redacted verifier/signer keys.
+        f.debug_struct("FpEngine").finish_non_exhaustive()
+    }
+}
+
+/// The `score` request body: the probe plus the host-recalled candidate block.
+#[derive(Debug, Deserialize)]
+struct ScoreRequest {
+    /// Raw probe component object from `POST /identify`.
+    components: Value,
+    /// Candidate templates the host fetched from its index; empty ⇒ new device.
+    #[serde(default)]
+    candidates: Vec<Candidate>,
+}
+
+/// One recalled candidate: its id and its stored raw component object.
+#[derive(Debug, Deserialize)]
+struct Candidate {
+    /// The candidate's resolved `visitorId`.
+    visitor_id: String,
+    /// The candidate's raw component object (re-salted inside the engine).
+    components: Value,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PROBE_KEY, probe, probe_with_key};
+    use super::{FpEngine, PROBE_KEY, probe, probe_with_key};
+    use serde_json::{Value, json};
 
-    /// Server-parity proof — reproduces `crates/fingerprintd` `expected_probe`
-    /// keyed with the `test-probe-secret` shared secret over `fixed-nonce-000`.
-    /// The expected hex is the shared vector in `tests/vectors/probe.json`.
+    /// A full, high-signal probe (8 components across all three kinds).
+    fn full_probe() -> Value {
+        json!({
+            "webgl": "ANGLE (Intel)",
+            "platform": "Linux x86_64",
+            "timezone": "Asia/Shanghai",
+            "audio": "124.04",
+            "cpu_cores": 8,
+            "device_memory": 8,
+            "fonts": ["Arial", "Helvetica", "Courier", "Times", "Verdana"],
+            "user_agent": "Chrome/120",
+        })
+    }
+
+    /// Server-parity proof — the browser collector reproduces `crates/fp-core`
+    /// `expected_probe` keyed with the `test-probe-secret` shared secret over
+    /// `fixed-nonce-000`. The expected hex is the shared vector in
+    /// `tests/vectors/probe.json`.
     #[test]
     fn matches_server_probe_vector() {
         let got = probe_with_key(b"test-probe-secret", "fixed-nonce-000").unwrap();
@@ -93,5 +283,113 @@ mod tests {
             probe_with_key(PROBE_KEY.as_bytes(), "nonce-1").unwrap()
         );
         assert_eq!(via_export.len(), 64); // hex of a 32-byte SHA-256 tag
+    }
+
+    /// The server-side engine reproduces the SAME shared probe vector through
+    /// [`fp_core`]'s verifier — tying the edge host's probe check to the client.
+    #[test]
+    fn engine_expected_probe_matches_shared_vector() {
+        let engine = FpEngine::new("salt", "test-probe-secret", "sign");
+        assert_eq!(
+            engine.expected_probe("fixed-nonce-000"),
+            "ad83144894f917b94072c2f7b3246af66d3bc5a450562ccf3671ed64d33137d0"
+        );
+        assert!(engine.verify_probe(
+            "fixed-nonce-000",
+            "ad83144894f917b94072c2f7b3246af66d3bc5a450562ccf3671ed64d33137d0"
+        ));
+        assert!(!engine.verify_probe("fixed-nonce-000", "deadbeef"));
+    }
+
+    /// Signing round-trips the `fp_core` signer and binds timestamp + body.
+    #[test]
+    fn engine_sign_binds_timestamp_and_body() {
+        let engine = FpEngine::new("salt", "pk", "signing-secret");
+        let body = br#"{"visitorId":"abc"}"#;
+        let sig = engine.sign(1_700_000_000_000, body);
+        assert_eq!(sig.len(), 64);
+        assert_eq!(sig, engine.sign(1_700_000_000_000, body));
+        assert_ne!(sig, engine.sign(1_700_000_000_001, body));
+        assert_ne!(
+            sig,
+            engine.sign(1_700_000_000_000, br#"{"visitorId":"xyz"}"#)
+        );
+    }
+
+    /// Shared signing vector — the edge engine, keyed with the deployment's
+    /// signing secret (a Worker Secret), reproduces the SAME
+    /// `hex(HMAC-SHA256(key, issued_ms_be ++ body))` the native `fp_core` signer
+    /// produces. The JS side (`workers/edge/tests/handler.test.ts`) asserts this
+    /// exact hex too, so the signing-secret path is byte-identical native↔edge —
+    /// the response-signing analogue of the `ad83…37d0` probe vector.
+    #[test]
+    fn engine_sign_matches_shared_vector() {
+        let engine = FpEngine::new("salt", "pk", "test-signing-secret");
+        assert_eq!(
+            engine.sign(1_700_000_000_000, br#"{"visitorId":"abc"}"#),
+            "11e764ff987d7be6e4f9e272c9c9fbb9c29fc8c5e3dcc5b935dfa11b9c751792"
+        );
+    }
+
+    /// Blocking keys are non-empty for a rich probe and **deterministic** across
+    /// separate engines sharing a salt secret — the stability an externalized
+    /// index relies on. A different secret yields different keys.
+    #[test]
+    fn blocking_keys_are_stable_across_engines() {
+        let a = FpEngine::new("salt-secret", "pk", "sk");
+        let b = FpEngine::new("salt-secret", "pk", "sk");
+        let probe = full_probe().to_string();
+
+        let ka = a.blocking_keys_impl(&probe).unwrap();
+        let kb = b.blocking_keys_impl(&probe).unwrap();
+        assert_eq!(ka, kb, "same secret must yield identical keys");
+
+        let parsed: Vec<String> = serde_json::from_str(&ka).unwrap();
+        assert!(!parsed.is_empty());
+        assert!(parsed.iter().all(|k| k.len() == 64)); // hex of a 32-byte digest
+
+        let other = FpEngine::new("other-secret", "pk", "sk");
+        assert_ne!(
+            other.blocking_keys_impl(&probe).unwrap(),
+            ka,
+            "a different salt secret must diverge"
+        );
+    }
+
+    /// An empty candidate set is judged a new device with a derived id.
+    #[test]
+    fn score_with_no_candidates_is_new_device() {
+        let engine = FpEngine::new("salt-secret", "pk", "sk");
+        let request = json!({ "components": full_probe(), "candidates": [] }).to_string();
+
+        let reply: Value = serde_json::from_str(&engine.score_impl(&request).unwrap()).unwrap();
+        assert_eq!(reply["decision"], "new_device");
+        assert_eq!(reply["is_new_device"], true);
+        assert_eq!(reply["visitor_id"].as_str().unwrap().len(), 64);
+    }
+
+    /// A candidate identical to the probe scores a match under its own id,
+    /// without minting a new device.
+    #[test]
+    fn score_recalls_and_matches_an_identical_candidate() {
+        let engine = FpEngine::new("salt-secret", "pk", "sk");
+        let request = json!({
+            "components": full_probe(),
+            "candidates": [{ "visitor_id": "v1", "components": full_probe() }],
+        })
+        .to_string();
+
+        let reply: Value = serde_json::from_str(&engine.score_impl(&request).unwrap()).unwrap();
+        assert_eq!(reply["decision"], "match");
+        assert_eq!(reply["is_new_device"], false);
+        assert_eq!(reply["visitor_id"], "v1");
+    }
+
+    /// Malformed request JSON errors rather than panicking.
+    #[test]
+    fn score_rejects_invalid_json() {
+        let engine = FpEngine::new("salt-secret", "pk", "sk");
+        assert!(engine.score_impl("not json").is_err());
+        assert!(engine.blocking_keys_impl("not json").is_err());
     }
 }

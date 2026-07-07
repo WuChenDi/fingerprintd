@@ -1,0 +1,40 @@
+[package]
+name    = "fp-core"
+version = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+publish                = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "fp_core"
+path = "src/lib.rs"
+
+[features]
+# `rng` gates the native-runtime pieces that need OS entropy or a wall clock: the
+# per-instance random constructors (`Salt::random`, `MinHashLsh::new`,
+# `FuzzyStore::new`), the in-memory `nonce` store (`std::time::Instant`), and the
+# offline `fuzzy::eval` harness — together with their sole dependency, `rand`. It
+# is on by default so the native server is unaffected. A stateless WebAssembly
+# host (`crates/fp-wasm`) depends on this crate with `default-features = false`
+# and uses only the deterministic, seed-derived compute — which keeps `rand` (and
+# its `getrandom` backend, unsupported on `wasm32-unknown-unknown`) out of the
+# wasm build graph entirely.
+default = ["rng"]
+rng = ["dep:rand"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+rand = { workspace = true, optional = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
