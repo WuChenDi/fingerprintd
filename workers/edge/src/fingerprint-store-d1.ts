@@ -3,66 +3,67 @@
  * drift persistence, the externalized form of `fp_core::fuzzy`'s in-memory
  * `RecordStore` + `BlockingIndex`.
  *
- * Two tables (see `migrations/0001_init.sql`): `templates` holds each visitor's
- * RAW component object (the WASM engine re-salts it on recall, so no salted
- * state is stored here), and `blocking_index` is the `key -> visitorId` inverted
- * index recall unions over. Persistence mirrors the native `identify` verdict
- * handling (design §7): a match drifts the template, a new device stores a fresh
- * one, a review writes nothing.
+ * Two tables (see `src/db/schema.ts`): `templates` holds each visitor's RAW
+ * component object (the WASM engine re-salts it on recall, so no salted state is
+ * stored here), and `blocking_index` is the `key -> visitorId` inverted index
+ * recall unions over. Persistence mirrors the native `identify` verdict handling
+ * (design §7): a match drifts the template, a new device stores a fresh one, a
+ * review writes nothing.
+ *
+ * Queries go through Drizzle (`drizzle-orm/d1`); the emitted SQL is equivalent
+ * to the hand-written statements it replaced, so the cross-stack parity holds.
  */
 
+import { eq, inArray, sql } from 'drizzle-orm'
+import type { Db } from './db/client'
+import { getDb } from './db/client'
+import { blockingIndex, templates } from './db/schema'
 import type { Candidate, CandidateSource } from './state'
 import type { ScoreOutcome } from './types'
 
-/** A `templates` row as recalled for scoring. */
-interface TemplateRow {
-  visitor_id: string
-  /** Raw component object, JSON-encoded. */
-  components: string
-}
-
-/** Just the stored component blob, for a drift read-merge. */
-interface ComponentsRow {
-  components: string
-}
-
 /**
- * Recall + persist over D1. Construct once per isolate from the `DB` binding.
- * Holds no state itself — every method is a query against the shared database.
+ * Recall + persist over D1 via Drizzle. Construct once per isolate from the `DB`
+ * binding. Holds no state itself — every method is a query against the shared
+ * database.
  */
 export class D1FingerprintStore implements CandidateSource {
-  constructor(private readonly db: D1Database) {}
+  private readonly db: Db
+
+  constructor(d1: D1Database) {
+    this.db = getDb(d1)
+  }
 
   /**
    * Union of every stored template sharing any of `blockingKeys` (design §4).
-   * Empty keys ⇒ nothing to recall. `DISTINCT` collapses a visitor matched by
-   * several keys to one candidate; the JOIN drops any index row whose template
-   * was not (yet) written.
+   * Empty keys ⇒ nothing to recall. `selectDistinct` collapses a visitor matched
+   * by several keys to one candidate; the inner join drops any index row whose
+   * template was not (yet) written.
    */
   async recall(blockingKeys: string[]): Promise<Candidate[]> {
     if (blockingKeys.length === 0) return []
-    const placeholders = blockingKeys.map(() => '?').join(', ')
-    const sql =
-      'SELECT DISTINCT t.visitor_id AS visitor_id, t.components AS components ' +
-      'FROM templates t ' +
-      'JOIN blocking_index b ON b.visitor_id = t.visitor_id ' +
-      `WHERE b.key IN (${placeholders})`
-    const { results } = await this.db
-      .prepare(sql)
-      .bind(...blockingKeys)
-      .all<TemplateRow>()
-    return results.map((row) => ({
-      visitor_id: row.visitor_id,
+    const rows = await this.db
+      .selectDistinct({
+        visitorId: templates.visitorId,
+        components: templates.components,
+      })
+      .from(templates)
+      .innerJoin(
+        blockingIndex,
+        eq(blockingIndex.visitorId, templates.visitorId),
+      )
+      .where(inArray(blockingIndex.key, blockingKeys))
+    return rows.map((row) => ({
+      visitor_id: row.visitorId,
       components: JSON.parse(row.components) as Record<string, unknown>,
     }))
   }
 
   /**
    * Fold the observation in per the verdict (design §7). A review is a no-op
-   * (anti-poisoning); a match drifts the matched template toward `components`
-   * by a per-component merge (present values overwrite, absent ones are
-   * retained — mirroring `RecordStore::observe`); a new device is stored whole.
-   * Either write also indexes `blockingKeys` under the resolved id.
+   * (anti-poisoning); a match drifts the matched template toward `components` by
+   * a per-component merge (present values overwrite, absent ones are retained —
+   * mirroring `RecordStore::observe`); a new device is stored whole. Either
+   * write also indexes `blockingKeys` under the resolved id.
    */
   async persist(
     outcome: ScoreOutcome,
@@ -88,10 +89,11 @@ export class D1FingerprintStore implements CandidateSource {
     visitorId: string,
   ): Promise<Record<string, unknown> | undefined> {
     const row = await this.db
-      .prepare('SELECT components FROM templates WHERE visitor_id = ?')
-      .bind(visitorId)
-      .first<ComponentsRow>()
-    if (row === null) return undefined
+      .select({ components: templates.components })
+      .from(templates)
+      .where(eq(templates.visitorId, visitorId))
+      .get()
+    if (row === undefined) return undefined
     return JSON.parse(row.components) as Record<string, unknown>
   }
 
@@ -107,21 +109,27 @@ export class D1FingerprintStore implements CandidateSource {
     nowMs: number,
   ): Promise<void> {
     const upsert = this.db
-      .prepare(
-        'INSERT INTO templates (visitor_id, components, first_seen, last_seen, observation_count) ' +
-          'VALUES (?, ?, ?, ?, 1) ' +
-          'ON CONFLICT(visitor_id) DO UPDATE SET ' +
-          'components = excluded.components, ' +
-          'last_seen = excluded.last_seen, ' +
-          'observation_count = templates.observation_count + 1',
-      )
-      .bind(visitorId, JSON.stringify(components), nowMs, nowMs)
+      .insert(templates)
+      .values({
+        visitorId,
+        components: JSON.stringify(components),
+        firstSeen: nowMs,
+        lastSeen: nowMs,
+        observationCount: 1,
+      })
+      .onConflictDoUpdate({
+        target: templates.visitorId,
+        set: {
+          components: sql`excluded.components`,
+          lastSeen: sql`excluded.last_seen`,
+          observationCount: sql`${templates.observationCount} + 1`,
+        },
+      })
     const index = blockingKeys.map((key) =>
       this.db
-        .prepare(
-          'INSERT OR IGNORE INTO blocking_index (key, visitor_id) VALUES (?, ?)',
-        )
-        .bind(key, visitorId),
+        .insert(blockingIndex)
+        .values({ key, visitorId })
+        .onConflictDoNothing(),
     )
     await this.db.batch([upsert, ...index])
   }

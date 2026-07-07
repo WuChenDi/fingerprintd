@@ -17,7 +17,7 @@ import { defineConfig } from 'vitest/config'
 // `test.poolOptions.workers` shape was removed). Storage isolation is now
 // per-test-FILE (not per-test), so state suites reset D1 in `beforeEach`.
 export default defineConfig(async () => {
-  const migrations = await readD1Migrations('./migrations')
+  const migrations = await readD1Migrations('./src/database')
   return {
     plugins: [
       cloudflareTest({

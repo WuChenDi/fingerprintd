@@ -1,14 +1,18 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
+import type { Deps } from '../src/app'
+import { createApp } from '../src/app'
 import type { Env } from '../src/config'
 import { resolveConfig } from '../src/config'
 import { EdgeEngine, initEngineRuntime } from '../src/engine'
-import type { Deps } from '../src/handler'
-import { handleRequest } from '../src/handler'
 import { SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER } from '../src/signature'
 import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
 import type { ChallengeResponse, IdentifyResponse } from '../src/types'
+
+/** Drive the Hono app with injected deps; state lives in `deps`, so a fresh app
+ *  per call is fine (a shim over the pre-Hono `handleRequest(req, deps)`). */
+const handleRequest = (req: Request, deps: Deps) => createApp(deps).request(req)
 
 // Load the vendored WASM engine once for the whole suite (mirrors how the
 // Worker inits per isolate, but from disk bytes instead of an `import`).

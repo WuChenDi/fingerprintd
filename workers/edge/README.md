@@ -22,11 +22,12 @@ cross-stack parity proof now run:
 | `value_frequency` (global `u_i`) | 🟡 schema provisioned; block-local `u_i` used | bounded divergence — see "Parity" |
 | Passive signals (JA4/IP) | 🟡 neutral degraded default | matches the server's default (no trusted edge) |
 
-The orchestration in `src/handler.ts` — derive blocking keys → recall candidates
-→ score → persist per the verdict — is the **real edge host flow**, mirroring
-`fp_core`'s `identify`. State is injected (`NonceStore` / `CandidateSource`), so
-the router is unchanged whether it runs on the Durable Object + D1 (Worker) or
-the in-isolate stubs (Node unit tests, or a bare `wrangler dev` with no bindings).
+The orchestration in `src/app.ts` (a Hono app) — derive blocking keys → recall
+candidates → score → persist per the verdict — is the **real edge host flow**,
+mirroring `fp_core`'s `identify`. `POST /identify` bodies are validated with Zod.
+State is injected (`NonceStore` / `CandidateSource`), so the app is unchanged
+whether it runs on the Durable Object + D1 (Worker) or the in-isolate stubs (Node
+unit tests, or a bare `wrangler dev` with no bindings).
 
 ## Parity (Worker == native)
 
@@ -77,18 +78,22 @@ time, so the **scoring input matches** even where the stored blob differs.
 src/
   index.ts                Worker entry — imports the .wasm, builds engine + state
                           per isolate, re-exports the nonce Durable Object
-  handler.ts              state-free router (dependency-injected, unit-testable)
+  app.ts                  Hono app (dependency-injected, unit-testable); Zod-
+                          validated POST /identify
   engine.ts               typed wrapper around the FpEngine WASM class + one-time init
   state.ts                NonceStore / CandidateSource contracts + in-isolate stubs
   nonce-do.ts             NonceDurableObject (atomic burn) + DurableNonceStore adapter
-  fingerprint-store-d1.ts D1 recall + drift persistence (templates + blocking index)
+  fingerprint-store-d1.ts D1 recall + drift persistence via Drizzle (templates + index)
+  db/schema.ts            Drizzle schema (templates / blocking_index / value_frequency)
+  db/client.ts            Drizzle D1 client factory
   config.ts               resolve typed config + state bindings from env
   types.ts                wire types, kept in sync with the server + browser SDK
   signature.ts            response-signature header names (T9)
-migrations/               D1 schema (applied with `wrangler d1 migrations apply`)
+  database/               drizzle-kit-generated D1 migrations (`wrangler d1 migrations apply`)
+drizzle.config.ts         drizzle-kit config (schema -> src/database)
 wasm/                     vendored `wasm-pack --target web` build of crates/fp-wasm
 tests/
-  handler.test.ts         Node: router contract + secret-gated paths over the WASM
+  app.test.ts             Node: Hono app contract + secret-gated paths over the WASM
   state.workers.test.ts   miniflare: nonce DO + D1 recall/drift + e2e
   parity.workers.test.ts  miniflare: cross-stack parity vs the native reference
   fixtures/parity.json    shared parity vectors (also driven by crates/fingerprintd)

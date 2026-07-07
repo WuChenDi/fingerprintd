@@ -15,3 +15,9 @@ coverage/
 
 # Local secrets — commit only the *.example
 .dev.vars
+
+# other
+collect_files.sh
+files_summary*.md
+temp
+tmp

@@ -40,13 +40,13 @@
     }
   ],
   // Fingerprint library + blocking inverted index (PCF4), bound as `env.DB`.
-  // Migrations live in ./migrations (applied with `wrangler d1 migrations apply`).
+  // Migrations live in ./src/database (drizzle-kit generate; applied with `wrangler d1 migrations apply`).
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "fingerprintd",
       "database_id": "local-fingerprintd",
-      "migrations_dir": "migrations"
+      "migrations_dir": "src/database"
     }
   ]
 }
