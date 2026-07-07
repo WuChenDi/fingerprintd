@@ -2,7 +2,7 @@
 
 Server-side device fingerprinting service (anti-fraud / anti-automation). The
 service issues one-time challenges and computes a `visitorId` + `confidence`
-server-side; the client only collects signals. See `prd.md` for the full
+server-side; the client only collects signals. See `docs/prd.md` for the full
 product spec.
 
 ## Status — P0 skeleton
