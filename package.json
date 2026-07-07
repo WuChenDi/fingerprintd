@@ -1,0 +1,28 @@
+{
+  "name": "fingerprintd",
+  "version": "0.0.0",
+  "description": "Server-side device fingerprinting: Rust cargo workspace (server + fp-core + fp-wasm) plus a Bun workspace for the TS packages.",
+  "type": "module",
+  "private": true,
+  "license": "UNLICENSED",
+  "workspaces": {
+    "packages": [
+      "clients/web",
+      "workers/edge"
+    ],
+    "catalog": {
+      "@types/node": "^24.0.0",
+      "typescript": "^5.7.2",
+      "vitest": "^2.1.8"
+    }
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
+    "build": "bun run --filter '*' build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2"
+  }
+}

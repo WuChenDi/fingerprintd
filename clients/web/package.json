@@ -21,16 +21,14 @@
   "scripts": {
     "build": "tsdown",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check ."
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.2.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "catalog:",
     "jsdom": "^25.0.1",
     "tsdown": "^0.22.3",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
     "@fingerprintjs/botd": "^2.0.0",

@@ -9,16 +9,14 @@
     "dev": "wrangler dev --local",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check .",
     "deploy:dry": "wrangler deploy --dry-run"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.2.0",
     "@cloudflare/vitest-pool-workers": "^0.5.0",
     "@cloudflare/workers-types": "^4.20241106.0",
-    "@types/node": "^24.0.0",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "^3.90.0"
   }
 }
