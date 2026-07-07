@@ -19,7 +19,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "biome check ."
@@ -28,7 +28,7 @@
     "@biomejs/biome": "^2.2.0",
     "@types/node": "^24.0.0",
     "jsdom": "^25.0.1",
-    "tsup": "^8.3.5",
+    "tsdown": "^0.22.3",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
