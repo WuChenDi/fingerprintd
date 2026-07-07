@@ -14,5 +14,8 @@ declare module 'cloudflare:test' {
     NONCE: DurableObjectNamespace
     /** Schema migrations, read at config time and applied in the setup file. */
     TEST_MIGRATIONS: D1Migration[]
+    /** Deterministic salt secret, pinned to the parity fixture's `salt_secret`
+     *  so the cross-stack parity suite reproduces the native reference. */
+    FP_SALT_SECRET: string
   }
 }

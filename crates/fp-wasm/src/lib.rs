@@ -316,6 +316,21 @@ mod tests {
         );
     }
 
+    /// Shared signing vector — the edge engine, keyed with the deployment's
+    /// signing secret (a Worker Secret), reproduces the SAME
+    /// `hex(HMAC-SHA256(key, issued_ms_be ++ body))` the native `fp_core` signer
+    /// produces. The JS side (`workers/edge/tests/handler.test.ts`) asserts this
+    /// exact hex too, so the signing-secret path is byte-identical native↔edge —
+    /// the response-signing analogue of the `ad83…37d0` probe vector.
+    #[test]
+    fn engine_sign_matches_shared_vector() {
+        let engine = FpEngine::new("salt", "pk", "test-signing-secret");
+        assert_eq!(
+            engine.sign(1_700_000_000_000, br#"{"visitorId":"abc"}"#),
+            "11e764ff987d7be6e4f9e272c9c9fbb9c29fc8c5e3dcc5b935dfa11b9c751792"
+        );
+    }
+
     /// Blocking keys are non-empty for a rich probe and **deterministic** across
     /// separate engines sharing a salt secret — the stability an externalized
     /// index relies on. A different secret yields different keys.

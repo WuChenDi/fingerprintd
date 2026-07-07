@@ -1,3 +1,5 @@
 node_modules
 .wrangler
 dist
+# Local secrets for `wrangler dev` (real values). Commit only `.dev.vars.example`.
+.dev.vars
