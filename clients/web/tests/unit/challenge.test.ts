@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { AudioToneParams, CanvasSurface } from '../src/challenge'
-import { challengeCollector, collectChallengeResponse } from '../src/challenge'
-import type { ChallengeResponse } from '../src/types'
-import type { RecordedRequest } from './helpers'
-import { mockFetch, sampleIdentify } from './helpers'
+import type { AudioToneParams, CanvasSurface } from '../../src/challenge'
+import {
+  challengeCollector,
+  collectChallengeResponse,
+} from '../../src/challenge'
+import type { ChallengeResponse } from '../../src/types'
+import type { RecordedRequest } from '../helpers'
+import { mockFetch, sampleIdentify } from '../helpers'
 
 /**
  * There is NO headless browser here, so canvas/audio are MOCKED. Both mocks are
@@ -139,7 +142,7 @@ describe('challengeCollector', () => {
   })
 
   it('drives run() end-to-end with the freshness proof kept out of matching', async () => {
-    const { run } = await import('../src/index')
+    const { run } = await import('../../src/index')
     const recorded: RecordedRequest[] = []
     const fetch = mockFetch(
       {

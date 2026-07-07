@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { initProbe, wasmProbeFn } from '../src/probe'
+import { initProbe, wasmProbeFn } from '../../src/probe'
 
 // vitest runs with cwd = clients/web (see the gate); resolve the vendored wasm
 // from there — jsdom's `import.meta.url` is not a file URL.

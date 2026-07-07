@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import type { BotdDetector, FingerprintAgent } from '../src/fingerprint'
-import { createFingerprintCollector } from '../src/fingerprint'
-import { sampleChallenge } from './helpers'
+import type { BotdDetector, FingerprintAgent } from '../../src/fingerprint'
+import { createFingerprintCollector } from '../../src/fingerprint'
+import { sampleChallenge } from '../helpers'
 
 /** A fake FingerprintJS agent returning canned components + a hash to discard. */
 function fakeFingerprint(
@@ -142,7 +142,7 @@ describe('createFingerprintCollector default loaders', () => {
     vi.doMock('@fingerprintjs/botd', () => ({ load: botdLoad }))
 
     const { createFingerprintCollector: create } = await import(
-      '../src/fingerprint'
+      '../../src/fingerprint'
     )
     const { stable_components } = await create()(sampleChallenge())
 

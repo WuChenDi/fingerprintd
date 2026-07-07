@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { verifySignature } from '../src/signature'
-import { serverSign } from './helpers'
+import { verifySignature } from '../../src/signature'
+import { serverSign } from '../helpers'
 
 const KEY = new TextEncoder().encode('test-signing-secret')
 const ISSUED_MS = 1_700_000_000_000
