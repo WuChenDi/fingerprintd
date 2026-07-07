@@ -12,14 +12,14 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { AudioToneParams, CanvasSurface } from '../src/challenge'
-import { createCollector } from '../src/collector'
-import type { BotdDetector, FingerprintAgent } from '../src/fingerprint'
-import { run } from '../src/index'
-import { initProbe } from '../src/probe'
-import type { ChallengeResponse } from '../src/types'
-import type { RecordedRequest } from './helpers'
-import { mockFetch, sampleIdentify } from './helpers'
+import type { AudioToneParams, CanvasSurface } from '../../src/challenge'
+import { createCollector } from '../../src/collector'
+import type { BotdDetector, FingerprintAgent } from '../../src/fingerprint'
+import { run } from '../../src/index'
+import { initProbe } from '../../src/probe'
+import type { ChallengeResponse } from '../../src/types'
+import type { RecordedRequest } from '../helpers'
+import { mockFetch, sampleIdentify } from '../helpers'
 
 function fakeFingerprint(
   components: Record<string, unknown>,

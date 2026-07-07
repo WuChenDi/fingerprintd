@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Collector } from '../src/collect'
-import { run, stubCollector } from '../src/index'
-import type { RecordedRequest } from './helpers'
+import type { Collector } from '../../src/collect'
+import { run, stubCollector } from '../../src/index'
+import type { RecordedRequest } from '../helpers'
 import {
   mockFetch,
   sampleChallenge,
   sampleIdentify,
   serverSign,
-} from './helpers'
+} from '../helpers'
 
 const KEY = new TextEncoder().encode('test-signing-secret')
 const ISSUED_MS = 1_700_000_000_000
