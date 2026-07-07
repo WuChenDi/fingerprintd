@@ -5,30 +5,55 @@ service issues one-time challenges and computes a `visitorId` + `confidence`
 server-side; the client only collects signals. See `docs/prd.md` for the full
 product spec.
 
-## Status — P0 skeleton
+## Status
 
-This is the **T1 skeleton** only: a runnable Axum server, layered configuration,
-and the CI quality gate. It exposes a single liveness endpoint. The
-`/challenge` and `/identify` endpoints, nonce lifecycle, and fuzzy matching are
-delivered in later tasks and mount onto `build_router` (see below).
+The server implements the full **P0–P3** feature set: one-time nonce
+`/challenge` issuance and lifecycle, `/identify` with server-side `visitorId` +
+`confidence`, fuzzy matching, passive signal collection, and server-side
+hardening (probe key, response signing, timestamp-window enforcement — the
+hardening controls are config-gated). Alongside it ships the **PC client shell**
+under `clients/web`: a TypeScript SDK integrating FingerprintJS/BotD, a
+nonce-challenge collector, and a Rust/WASM probe core (`crates/fp-wasm`).
 
-| Endpoint      | Method | Response         |
-| ------------- | ------ | ---------------- |
-| `/health`     | GET    | `200 OK`         |
+| Endpoint     | Method | Purpose                                          |
+| ------------ | ------ | ------------------------------------------------ |
+| `/health`    | GET    | Liveness (`200 OK`)                              |
+| `/challenge` | GET    | Issue a one-time nonce challenge                 |
+| `/identify`  | POST   | Compute `visitorId` + `confidence` from signals  |
 
-## Layout
+Verified test counts:
+
+- **Server: 85** — `cargo nextest run -p fingerprintd`
+- **Client: 34** — `vitest` (in `clients/web`)
+- **WASM: 3** — `cargo test -p fp-wasm`
+
+**Environment limit:** the client tests run without a headless browser (jsdom +
+mocked `fetch`, canvas, and audio backends only). Real in-browser certification
+is deferred to a human — see `clients/web/README.md`.
+
+## Project structure
 
 ```
 Cargo.toml                       # workspace root (edition 2024, lints, deps)
-crates/fingerprintd/
-  src/lib.rs                     # build_router() — the HTTP extension point
-  src/config.rs                  # Config + Config::load()
-  src/main.rs                    # #[tokio::main] entry point
+crates/
+  fingerprintd/                  # Axum server (challenge / identify / matching)
+  fp-wasm/                       # Rust/WASM probe core
+clients/
+  web/                           # TypeScript SDK (FingerprintJS/BotD + collector)
+docs/
+  prd.md                         # product spec
+  design-fuzzy-matching.md       # fuzzy-matching design
+  audit/audit-report.md          # PRD audit report
 ```
 
-`build_router() -> axum::Router` is the single place routes are mounted; later
-tasks chain additional `.route(...)` calls (and, when state is introduced,
-switch to `Router::with_state`).
+`crates/fingerprintd/src/lib.rs` exposes `build_router() -> axum::Router`, the
+single place HTTP routes are mounted.
+
+Design and specification docs live under [`docs/`](docs/):
+
+- [`docs/prd.md`](docs/prd.md) — product spec
+- [`docs/design-fuzzy-matching.md`](docs/design-fuzzy-matching.md) — fuzzy-matching design
+- [`docs/audit/audit-report.md`](docs/audit/audit-report.md) — PRD audit report
 
 ## Configuration
 
