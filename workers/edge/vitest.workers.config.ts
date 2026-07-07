@@ -30,8 +30,15 @@ export default defineWorkersConfig(async () => {
           miniflare: {
             // Required by the Workers pool; harmless for this Worker.
             compatibilityFlags: ['nodejs_compat'],
-            // Read at config time, applied by the setup file.
-            bindings: { TEST_MIGRATIONS: migrations },
+            // Read at config time, applied by the setup file. `FP_SALT_SECRET`
+            // pins the deterministic salt so the cross-stack parity suite
+            // (`parity.workers.test.ts`) reproduces the native reference — it MUST
+            // equal `salt_secret` in `tests/fixtures/parity.json` (the suite
+            // asserts the coupling). In a real deployment this is a Worker Secret.
+            bindings: {
+              TEST_MIGRATIONS: migrations,
+              FP_SALT_SECRET: 'fp-parity-vector-secret',
+            },
           },
         },
       },

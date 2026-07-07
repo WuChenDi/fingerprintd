@@ -6,9 +6,10 @@ a **TypeScript host** that owns I/O and routing, calling **Rust compiled to WASM
 deployment target for the same engine as the native Axum server
 (`crates/fingerprintd`) — a client works against **either** unchanged.
 
-## Status: PCF4 — state layer wired (nonce Durable Object + D1)
+## Status: PCF5 — integrated + parity-verified against the native server
 
-The request surface, the WASM engine, **and** the externalized state now run:
+The request surface, the WASM engine, the externalized state, **and** a
+cross-stack parity proof now run:
 
 | Concern | Status | Notes |
 | --- | --- | --- |
@@ -16,8 +17,10 @@ The request surface, the WASM engine, **and** the externalized state now run:
 | WASM compute (blocking keys, scoring, probe, signing) | ✅ real (`FpEngine`) | |
 | One-time nonce | ✅ Durable Object (`NonceDurableObject`) | atomic check-and-burn + TTL alarm |
 | Fingerprint library + blocking index | ✅ D1 (`templates`, `blocking_index`) | recall → score → drift write-back |
-| `value_frequency` (global `u_i`) | 🟡 schema provisioned, not yet wired | PCF5 refinement (see below) |
-| Passive signals (JA4/IP) | 🟡 neutral degraded default | host-side port deferred |
+| Worker Secrets (salt / probe / signing) | ✅ read at runtime; local via `.dev.vars` | never embedded — see "Deploy" |
+| Parity (Worker == native fp-core) | ✅ shared-fixture suite, both stacks | see "Parity" below |
+| `value_frequency` (global `u_i`) | 🟡 schema provisioned; block-local `u_i` used | bounded divergence — see "Parity" |
+| Passive signals (JA4/IP) | 🟡 neutral degraded default | matches the server's default (no trusted edge) |
 
 The orchestration in `src/handler.ts` — derive blocking keys → recall candidates
 → score → persist per the verdict — is the **real edge host flow**, mirroring
@@ -25,17 +28,48 @@ The orchestration in `src/handler.ts` — derive blocking keys → recall candid
 the router is unchanged whether it runs on the Durable Object + D1 (Worker) or
 the in-isolate stubs (Node unit tests, or a bare `wrangler dev` with no bindings).
 
-### Deferred to PCF5 (parity)
+## Parity (Worker == native)
 
-- **Global frequency (`u_i`).** The native scorer reads a global `value_hash →
-  count` table; the WASM `score` approximates `u_i` over the recalled candidate
-  block. The `value_frequency` table is provisioned (migration `0001`) so wiring
-  the global snapshot — and populating it via a WASM-exposed salted hasher — is a
-  pure addition, not a migration.
-- **Template-merge edge cases.** Drift merges raw components per key (present
-  overwrites, absent retained). Native additionally drops null/invalid values
-  from the stored form; the WASM re-derivation drops them at score time, so the
-  scoring input matches, but the stored blob can differ. Finalized in PCF5.
+The edge Worker and the native Axum server (`crates/fingerprintd`) are two
+deployments of ONE engine (`crates/fp-core`, exposed to JS via `crates/fp-wasm`).
+A single committed fixture, `tests/fixtures/parity.json`, drives **both** stacks
+and asserts the SAME `expect` block field-by-field:
+
+- `crates/fingerprintd/tests/parity.rs` runs the vectors through the native
+  `FuzzyStore::identify`.
+- `tests/parity.workers.test.ts` runs the SAME vectors through the full edge
+  stack — WASM engine + nonce Durable Object + D1 — in real workerd/miniflare.
+
+Both are seeded from the fixture's `salt_secret` (native production uses a random
+per-process salt; the edge pins it as a Worker Secret so keys are stable across
+isolates), and both assert `visitorId`, `decision`, `is_new_device`,
+`collision_risk`, and `confidence` (to a `1e-12` tolerance). Regenerate the
+`expect` values with `cargo test -p fingerprintd --test parity -- --nocapture`,
+which prints the outcomes the native engine computed.
+
+Two keyed-hash vectors additionally pin the secret-gated paths byte-for-byte
+across stacks — the probe key (`ad83…37d0`) and the signing key (`11e7…1792`),
+each asserted in a native `fp-wasm` test and its JS counterpart.
+
+### Confidence exactness boundary (the block-local `u_i`)
+
+`confidence` matches **exactly** whenever a probe's recalled candidate block is
+the whole stored population (a single device, or a set that all recall together)
+— which the parity fixtures are built to hold. The one place the two stacks can
+diverge is the Fellegi–Sunter rarity term `u_i`: the native scorer reads a
+**global** `value_hash → count` frequency table, while the WASM `score`
+estimates `u_i` over just the recalled block. They coincide until the store holds
+a device that a scoring probe does NOT recall (a heterogeneous population with
+partial recall), after which `u_i` — and only `confidence`, never the identity or
+decision — can differ slightly. Closing that gap means populating `value_frequency`
+(migration `0001` provisions it) via a WASM-exposed salted hasher and feeding the
+global snapshot into `score`; it is a pure addition, not a migration, and remains
+a deliberate future refinement. Identity and decision parity hold regardless.
+
+The template-merge edge case is likewise bounded: drift merges raw components per
+key (present overwrites, absent retained); native additionally drops null/invalid
+values from its stored form, but the WASM re-derivation drops them again at score
+time, so the **scoring input matches** even where the stored blob differs.
 
 ## Layout
 
@@ -53,6 +87,11 @@ src/
   signature.ts            response-signature header names (T9)
 migrations/               D1 schema (applied with `wrangler d1 migrations apply`)
 wasm/                     vendored `wasm-pack --target web` build of crates/fp-wasm
+tests/
+  handler.test.ts         Node: router contract + secret-gated paths over the WASM
+  state.workers.test.ts   miniflare: nonce DO + D1 recall/drift + e2e
+  parity.workers.test.ts  miniflare: cross-stack parity vs the native reference
+  fixtures/parity.json    shared parity vectors (also driven by crates/fingerprintd)
 ```
 
 ## Configuration
@@ -73,9 +112,21 @@ secrets are read at runtime — never embedded.
 | `NONCE` (Durable Object) | one-time nonce store; unbound ⇒ in-isolate stub | — |
 | `DB` (D1) | fingerprint library + blocking index; unbound ⇒ empty stub | — |
 
-Set real secrets with `wrangler secret put FP_SALT_SECRET` (etc.); never commit them.
+The three `FP_*` **secrets** are read at runtime and never embedded in the
+artifact. Provide them per environment:
+
+- **Local (`wrangler dev`):** copy `.dev.vars.example` → `.dev.vars` (gitignored)
+  and fill in values. `wrangler dev` loads them into the same `env.FP_*` bindings.
+- **Remote:** set each with `wrangler secret put FP_SALT_SECRET` (etc.) — never
+  commit them. `[vars]` in `wrangler.toml` are for the non-secret flags only.
+
 The `NONCE` / `DB` bindings are wired in `wrangler.toml`; a bare `wrangler dev`
 without them falls back to the stubs (single-isolate nonce, every probe new).
+
+`FP_SALT_SECRET` MUST be stable and identical across every isolate — it seeds the
+deterministic salt + MinHash family, so rotating it re-partitions the blocking
+index and orphans every stored template (all devices re-mint). Treat it as a
+long-lived deployment identity, not a routinely rotated credential.
 
 ## Develop & verify
 
@@ -85,16 +136,26 @@ bun run lint        # biome check .
 bun run typecheck   # tsc --noEmit
 bun run test        # vitest run — two projects:
                     #   node    — router contract over the vendored WASM
-                    #   workers — state layer (nonce DO + D1) in real miniflare
+                    #   workers — state layer (nonce DO + D1) + cross-stack parity
+                    #             in real miniflare
 bun run deploy:dry  # wrangler deploy --dry-run (bundles the Worker + .wasm + bindings)
-bun run dev         # wrangler dev --local (local workerd; no account needed)
+bun run dev         # wrangler dev --local (loads .dev.vars; local workerd, no account)
+```
+
+For a full cross-stack check, pair the Worker `test` with the native reference so
+both halves of the parity fixture are exercised:
+
+```bash
+bun run test                                       # edge half (workers project)
+cargo test -p fingerprintd --test parity           # native half (from repo root)
 ```
 
 The `workers` test project (`*.workers.test.ts`) runs under
-`@cloudflare/vitest-pool-workers`, so the Durable Object burn and the D1
-recall/persist round-trips execute against the actual workerd runtime with the
-`wrangler.toml` bindings live — a fresh local D1 with `migrations/` applied. No
-Cloudflare account is needed; miniflare provides D1/DO locally.
+`@cloudflare/vitest-pool-workers`, so the Durable Object burn, the D1
+recall/persist round-trips, **and** the parity vectors execute against the actual
+workerd runtime with the `wrangler.toml` bindings live — a fresh local D1 with
+`migrations/` applied. No Cloudflare account is needed; miniflare provides D1/DO
+locally.
 
 Apply migrations to a real (or persistent local) D1 with:
 
@@ -116,12 +177,62 @@ rm -f workers/edge/wasm/.gitignore workers/edge/wasm/package.json  # keep only t
 The server-side `FpEngine` takes its keys at runtime, so no build-time key
 injection is needed here (unlike the browser probe in `clients/web`).
 
+## Deploy
+
+### Local (no account)
+
+```bash
+cp .dev.vars.example .dev.vars                       # then edit in real dev values
+wrangler d1 migrations apply fingerprintd --local    # seed the local sqlite schema
+bun run dev                                          # wrangler dev --local
+```
+
+`wrangler dev --local` runs the full stack — Worker + WASM + Durable Object + D1 —
+in local workerd/miniflare, loading `.dev.vars` as the secrets. No account needed.
+
+### Real Cloudflare (account holder)
+
+1. **Create D1** and copy the id it prints into `wrangler.toml`
+   (`[[d1_databases]].database_id`, replacing the `local-fingerprintd`
+   placeholder):
+
+   ```bash
+   wrangler d1 create fingerprintd
+   ```
+
+2. **Apply migrations** to the remote database:
+
+   ```bash
+   wrangler d1 migrations apply fingerprintd
+   ```
+
+3. **Set the secrets** (prompted for each value; nothing is committed):
+
+   ```bash
+   wrangler secret put FP_SALT_SECRET     # required — stable, high-entropy
+   wrangler secret put FP_PROBE_KEY       # optional — enables the nonce probe (T8)
+   wrangler secret put FP_SIGNING_KEY     # optional — enables response signing (T9)
+   ```
+
+   If `FP_PROBE_KEY` is set, build the browser collector (`clients/web`) with the
+   SAME key so its probe verifies (see that package's WASM build).
+
+4. **Deploy.** The Durable Object migration in `wrangler.toml` (`[[migrations]]
+   new_sqlite_classes`) provisions the nonce class on first publish:
+
+   ```bash
+   wrangler deploy
+   ```
+
+Validate the config offline first with `bun run deploy:dry` (bundles the Worker +
+`.wasm` and resolves the bindings without publishing).
+
 ## Environment limit
 
 There is **no Cloudflare account** in this environment and Durable Objects + D1
-are paid, so only **local** execution is wired: `wrangler dev --local`,
-`wrangler deploy --dry-run`, and the miniflare-backed `workers` test project.
-The Durable Object and D1 bindings are fully declared in `wrangler.toml` and the
-`database_id` is a local placeholder; a real remote deploy — swapping in the id
-from `wrangler d1 create` and running `wrangler d1 migrations apply` — is
-deferred to a human with an account.
+are paid, so only **local** execution is wired and verified here: `wrangler dev
+--local`, `wrangler deploy --dry-run`, and the miniflare-backed `workers` test
+project (state + parity). The Durable Object and D1 bindings are fully declared
+in `wrangler.toml` and the `database_id` is a local placeholder; the real remote
+deploy above — creating the D1, applying migrations, setting the secrets, and
+`wrangler deploy` — is deferred to a human with an account.

@@ -225,6 +225,20 @@ describe('response signing (T9)', () => {
     const tampered = new Uint8Array([...bodyBytes, 0x20])
     expect(deps.engine.sign(issuedMs, tampered)).not.toBe(signature)
   })
+
+  it('reproduces the shared signing vector', () => {
+    // Ties the edge signer to the native `fp_core::signing::ResponseSigner`
+    // (crates/fp-wasm `engine_sign_matches_shared_vector`): same signing key,
+    // same timestamp + body, same hex — the response-signing analogue of the
+    // probe parity vector, proving the signing Worker Secret path is identical.
+    const engine = new EdgeEngine(
+      resolveConfig({ FP_SIGNING_KEY: 'test-signing-secret' }),
+    )
+    const body = new TextEncoder().encode('{"visitorId":"abc"}')
+    expect(engine.sign(1_700_000_000_000, body)).toBe(
+      '11e764ff987d7be6e4f9e272c9c9fbb9c29fc8c5e3dcc5b935dfa11b9c751792',
+    )
+  })
 })
 
 describe('timestamp window (T9)', () => {
