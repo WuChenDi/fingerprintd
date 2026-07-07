@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { getChallenge, identify } from '../src/client'
-import type { IdentifyRequest } from '../src/types'
-import type { RecordedRequest } from './helpers'
-import { mockFetch, sampleChallenge, sampleIdentify } from './helpers'
+import { getChallenge, identify } from '../../src/client'
+import type { IdentifyRequest } from '../../src/types'
+import type { RecordedRequest } from '../helpers'
+import { mockFetch, sampleChallenge, sampleIdentify } from '../helpers'
 
 describe('getChallenge', () => {
   it('fetches and parses the challenge body', async () => {
