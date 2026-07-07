@@ -11,8 +11,14 @@
  * are Worker Secrets; the rest are `[vars]`. Secrets are never embedded.
  */
 
-/** Cloudflare Worker environment bindings (all optional; string-typed vars). */
+/** Cloudflare Worker environment bindings: string-typed config vars plus the
+ *  PCF4 state bindings. All optional so the router stays unit-testable with
+ *  injected stubs and the Worker degrades to in-isolate state when unbound. */
 export interface Env {
+  /** Nonce Durable Object namespace (PCF4). Unbound ⇒ the in-isolate stub. */
+  NONCE?: DurableObjectNamespace
+  /** D1 fingerprint database (PCF4). Unbound ⇒ the empty candidate stub. */
+  DB?: D1Database
   /** Seeds the deterministic salt + MinHash family so blocking keys are stable
    *  across isolates (Worker Secret). Falls back to a dev-only placeholder. */
   FP_SALT_SECRET?: string

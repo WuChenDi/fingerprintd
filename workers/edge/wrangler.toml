@@ -2,8 +2,10 @@
 #
 # ENV LIMIT: there is no CF account / `wrangler login` in this environment and
 # Durable Objects + D1 are paid, so only LOCAL execution is wired here
-# (`wrangler dev --local`, `wrangler deploy --dry-run`). A real deploy — and the
-# DO / D1 bindings PCF4 adds — is deferred to a human with an account.
+# (`wrangler dev --local`, `wrangler deploy --dry-run`, and the miniflare-backed
+# vitest state suite). A real remote deploy is deferred to a human with an
+# account — see README "Environment limit". The `database_id` below is a
+# placeholder; a real deploy replaces it with the id from `wrangler d1 create`.
 
 name = "fingerprintd-edge"
 main = "src/index.ts"
@@ -18,10 +20,21 @@ workers_dev = true
 FP_NONCE_TTL_SECS = "30"
 FP_TS_SKEW_SECS = "30"
 
-# PCF4 adds the nonce Durable Object and the D1 candidate index here, e.g.:
-#   [[durable_objects.bindings]]
-#   name = "NONCE"
-#   class_name = "NonceStore"
-#   [[d1_databases]]
-#   binding = "DB"
-#   database_name = "fingerprintd"
+# One-time nonce store (PCF4): a Durable Object gives the atomic check-and-burn
+# that D1/KV eventual consistency cannot. Bound as `env.NONCE`.
+[[durable_objects.bindings]]
+name = "NONCE"
+class_name = "NonceDurableObject"
+
+# SQLite-backed Durable Object storage for the nonce class.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NonceDurableObject"]
+
+# Fingerprint library + blocking inverted index (PCF4), bound as `env.DB`.
+# Migrations live in ./migrations (applied with `wrangler d1 migrations apply`).
+[[d1_databases]]
+binding = "DB"
+database_name = "fingerprintd"
+database_id = "local-fingerprintd"
+migrations_dir = "migrations"
