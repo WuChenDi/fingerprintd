@@ -1,1 +1,17 @@
+# Rust
 /target
+
+# Node / Bun
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+
+# Cloudflare Workers local state (miniflare + local D1 sqlite live here)
+.wrangler/
+
+# Test / build output
+coverage/
+
+# Local secrets — commit only the *.example
+.dev.vars
