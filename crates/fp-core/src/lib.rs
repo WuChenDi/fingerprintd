@@ -23,6 +23,10 @@
 #![forbid(unsafe_code)]
 
 pub mod fuzzy;
+// The in-memory nonce store needs OS entropy and a wall clock
+// (`std::time::Instant`), neither available on `wasm32-unknown-unknown`; on the
+// edge the nonce lifecycle is a Durable Object, so the WASM build omits it.
+#[cfg(feature = "rng")]
 pub mod nonce;
 pub mod probe;
 pub mod signing;

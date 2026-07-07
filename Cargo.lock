@@ -228,8 +228,11 @@ dependencies = [
 name = "fp-wasm"
 version = "0.1.0"
 dependencies = [
+ "fp-core",
  "hex",
  "hmac",
+ "serde",
+ "serde_json",
  "sha2",
  "wasm-bindgen",
 ]

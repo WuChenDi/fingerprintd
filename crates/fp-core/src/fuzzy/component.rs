@@ -7,6 +7,7 @@
 
 use std::collections::BTreeSet;
 
+#[cfg(feature = "rng")]
 use rand::{RngCore, rng};
 use sha2::{Digest, Sha256};
 
@@ -24,9 +25,26 @@ pub struct Salt([u8; 16]);
 
 impl Salt {
     /// Generate a fresh random salt.
+    #[cfg(feature = "rng")]
     pub fn random() -> Self {
         let mut bytes = [0u8; 16];
         rng().fill_bytes(&mut bytes);
+        Self(bytes)
+    }
+
+    /// Derive a deterministic salt from a configured secret.
+    ///
+    /// A stateless edge deployment cannot use a per-instance [`Salt::random`]
+    /// salt: stored hashes and blocking keys must be identical across isolate
+    /// instances so a key derived on one request matches one persisted on
+    /// another. The salt is the first 16 bytes of `SHA-256(secret)`; a
+    /// deployment supplies the same secret (a Worker Secret) to every instance.
+    /// The secret is never stored, so it remains as non-reversible as the random
+    /// salt while being reproducible.
+    pub fn from_secret(secret: &[u8]) -> Self {
+        let digest = Sha256::digest(secret);
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
         Self(bytes)
     }
 
