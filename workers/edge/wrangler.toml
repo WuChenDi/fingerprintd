@@ -1,0 +1,27 @@
+# Cloudflare Worker config for the fingerprintd edge deployment.
+#
+# ENV LIMIT: there is no CF account / `wrangler login` in this environment and
+# Durable Objects + D1 are paid, so only LOCAL execution is wired here
+# (`wrangler dev --local`, `wrangler deploy --dry-run`). A real deploy — and the
+# DO / D1 bindings PCF4 adds — is deferred to a human with an account.
+
+name = "fingerprintd-edge"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# Non-secret defaults for local dev. Real secrets (FP_SALT_SECRET, FP_PROBE_KEY,
+# FP_SIGNING_KEY) are set with `wrangler secret put <NAME>`, never committed.
+# With none set the Worker mirrors a default `fingerprintd`: probe off, signing
+# off, timestamp window off, 30s nonce TTL.
+[vars]
+FP_NONCE_TTL_SECS = "30"
+FP_TS_SKEW_SECS = "30"
+
+# PCF4 adds the nonce Durable Object and the D1 candidate index here, e.g.:
+#   [[durable_objects.bindings]]
+#   name = "NONCE"
+#   class_name = "NonceStore"
+#   [[d1_databases]]
+#   binding = "DB"
+#   database_name = "fingerprintd"
