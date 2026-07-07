@@ -1,5 +1,5 @@
 import { env, SELF } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { IdentifyResponse } from '../src/types'
 import parityFixture from './fixtures/parity.json'
 
@@ -61,6 +61,16 @@ async function identify(
   return { status: resp.status, body: (await resp.json()) as IdentifyResponse }
 }
 
+// Storage isolation is per test FILE in pool-workers 0.18 (not per test), so
+// reset the D1 store before each scenario — matching the fresh
+// `FuzzyStore::deterministic` the native test builds per scenario.
+beforeEach(async () => {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM blocking_index'),
+    env.DB.prepare('DELETE FROM templates'),
+  ])
+})
+
 describe('cross-stack parity (Worker == native)', () => {
   // Guard the coupling: the deterministic salt the Worker runs with MUST be the
   // one the native reference used, or the vectors are not comparable.
@@ -68,9 +78,9 @@ describe('cross-stack parity (Worker == native)', () => {
     expect(env.FP_SALT_SECRET).toBe(fixture.salt_secret)
   })
 
-  // Each scenario is an independent `it`: the Workers pool gives every test
-  // isolated D1 + Durable Object storage, so the store starts empty — matching
-  // the fresh `FuzzyStore::deterministic` the native test builds per scenario.
+  // Each scenario is an independent `it`: `beforeEach` empties the D1 store so
+  // it starts fresh — matching the fresh `FuzzyStore::deterministic` the native
+  // test builds per scenario.
   for (const scenario of fixture.scenarios) {
     it(scenario.name, async () => {
       const resolved = new Map<string, string>()

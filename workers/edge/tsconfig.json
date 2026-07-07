@@ -21,7 +21,7 @@
     "src",
     "tests",
     "vitest.config.ts",
-    "vitest.workers.config.ts",
-    "vitest.workspace.ts"
+    "vitest.node.config.ts",
+    "vitest.workers.config.ts"
   ]
 }

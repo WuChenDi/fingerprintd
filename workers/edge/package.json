@@ -12,11 +12,11 @@
     "deploy:dry": "wrangler deploy --dry-run"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.5.0",
-    "@cloudflare/workers-types": "^4.20241106.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^5.20260707.1",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.107.0"
   }
 }

@@ -1,15 +1,14 @@
-import { configDefaults, defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config'
 
-// The router is state-free and dependency-injected, so it runs under plain Node
-// with the WASM engine loaded from the vendored bytes — no Workers runtime
-// needed for the unit contract. The PCF4 state layer (nonce Durable Object, D1)
-// needs real workerd, so those `*.workers.test.ts` files run in the sibling
-// Workers project (`vitest.workers.config.ts`) and are excluded here.
+// Two projects run under one `vitest run`. Vitest 4 removed the standalone
+// workspace file (`vitest.workspace.ts`) in favour of `test.projects`:
+//   - vitest.node.config.ts    — Node: the state-free router contract over the
+//                                vendored WASM bytes (no Workers runtime).
+//   - vitest.workers.config.ts — workerd/miniflare: the PCF4 state layer (nonce
+//                                Durable Object, D1 recall/persist) against the
+//                                real runtime with live bindings.
 export default defineConfig({
   test: {
-    name: 'node',
-    environment: 'node',
-    include: ['tests/**/*.test.ts'],
-    exclude: [...configDefaults.exclude, 'tests/**/*.workers.test.ts'],
+    projects: ['./vitest.node.config.ts', './vitest.workers.config.ts'],
   },
 })
