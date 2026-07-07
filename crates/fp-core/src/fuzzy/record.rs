@@ -28,6 +28,22 @@ pub struct FingerprintRecord {
     pub observation_count: u64,
 }
 
+/// Storage contract for the `visitorId → template` fingerprint library
+/// (design §3/§11).
+///
+/// The in-memory [`RecordStore`] is the single-instance implementation. An
+/// externalized backend (a Cloudflare D1 template table, a later step) lives
+/// behind the same contract, so the engine folds observations and reads
+/// templates without knowing where the library is stored.
+pub trait FingerprintStore: Send + Sync {
+    /// Fold an observation into `visitor`'s record, creating it if new. Returns
+    /// `true` when the visitor was newly recorded.
+    fn observe(&self, visitor: &str, components: BTreeMap<String, Stored>, now_ms: u64) -> bool;
+
+    /// Snapshot of `visitor`'s template, if present.
+    fn get(&self, visitor: &str) -> Option<FingerprintRecord>;
+}
+
 /// In-memory `visitorId → record` fingerprint library (design §11).
 #[derive(Debug, Default)]
 pub struct RecordStore {
@@ -96,6 +112,16 @@ impl RecordStore {
     /// Lock the record map, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, FingerprintRecord>> {
         self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl FingerprintStore for RecordStore {
+    fn observe(&self, visitor: &str, components: BTreeMap<String, Stored>, now_ms: u64) -> bool {
+        RecordStore::observe(self, visitor, components, now_ms)
+    }
+
+    fn get(&self, visitor: &str) -> Option<FingerprintRecord> {
+        RecordStore::get(self, visitor)
     }
 }
 

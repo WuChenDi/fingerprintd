@@ -1,5 +1,5 @@
 [package]
-name    = "fingerprintd"
+name    = "fp-core"
 version = "0.1.0"
 edition.workspace      = true
 rust-version.workspace = true
@@ -9,27 +9,19 @@ publish                = false
 [lints]
 workspace = true
 
-[[bin]]
-name = "fingerprintd"
-path = "src/main.rs"
-
 [lib]
-name = "fingerprintd"
+name = "fp_core"
 path = "src/lib.rs"
 
 [dependencies]
-fp-core = { path = "../fp-core" }
-tokio = { workspace = true }
-axum  = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-figment = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+rand = { workspace = true }
 sha2 = { workspace = true }
+hmac = { workspace = true }
 hex = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
-tower = { workspace = true }
-figment = { workspace = true, features = ["test"] }
