@@ -118,9 +118,9 @@ artifact. Provide them per environment:
 - **Local (`wrangler dev`):** copy `.dev.vars.example` → `.dev.vars` (gitignored)
   and fill in values. `wrangler dev` loads them into the same `env.FP_*` bindings.
 - **Remote:** set each with `wrangler secret put FP_SALT_SECRET` (etc.) — never
-  commit them. `[vars]` in `wrangler.toml` are for the non-secret flags only.
+  commit them. `[vars]` in `wrangler.jsonc` are for the non-secret flags only.
 
-The `NONCE` / `DB` bindings are wired in `wrangler.toml`; a bare `wrangler dev`
+The `NONCE` / `DB` bindings are wired in `wrangler.jsonc`; a bare `wrangler dev`
 without them falls back to the stubs (single-isolate nonce, every probe new).
 
 `FP_SALT_SECRET` MUST be stable and identical across every isolate — it seeds the
@@ -153,7 +153,7 @@ cargo test -p fingerprintd --test parity           # native half (from repo root
 The `workers` test project (`*.workers.test.ts`) runs under
 `@cloudflare/vitest-pool-workers`, so the Durable Object burn, the D1
 recall/persist round-trips, **and** the parity vectors execute against the actual
-workerd runtime with the `wrangler.toml` bindings live — a fresh local D1 with
+workerd runtime with the `wrangler.jsonc` bindings live — a fresh local D1 with
 `migrations/` applied. No Cloudflare account is needed; miniflare provides D1/DO
 locally.
 
@@ -192,7 +192,7 @@ in local workerd/miniflare, loading `.dev.vars` as the secrets. No account neede
 
 ### Real Cloudflare (account holder)
 
-1. **Create D1** and copy the id it prints into `wrangler.toml`
+1. **Create D1** and copy the id it prints into `wrangler.jsonc`
    (`[[d1_databases]].database_id`, replacing the `local-fingerprintd`
    placeholder):
 
@@ -217,7 +217,7 @@ in local workerd/miniflare, loading `.dev.vars` as the secrets. No account neede
    If `FP_PROBE_KEY` is set, build the browser collector (`clients/web`) with the
    SAME key so its probe verifies (see that package's WASM build).
 
-4. **Deploy.** The Durable Object migration in `wrangler.toml` (`[[migrations]]
+4. **Deploy.** The Durable Object migration in `wrangler.jsonc` (`[[migrations]]
    new_sqlite_classes`) provisions the nonce class on first publish:
 
    ```bash
@@ -233,6 +233,6 @@ There is **no Cloudflare account** in this environment and Durable Objects + D1
 are paid, so only **local** execution is wired and verified here: `wrangler dev
 --local`, `wrangler deploy --dry-run`, and the miniflare-backed `workers` test
 project (state + parity). The Durable Object and D1 bindings are fully declared
-in `wrangler.toml` and the `database_id` is a local placeholder; the real remote
+in `wrangler.jsonc` and the `database_id` is a local placeholder; the real remote
 deploy above — creating the D1, applying migrations, setting the secrets, and
 `wrangler deploy` — is deferred to a human with an account.

@@ -4,7 +4,7 @@ import {
 } from '@cloudflare/vitest-pool-workers/config'
 
 // The state suite (`*.workers.test.ts`) runs inside real workerd/miniflare with
-// the wrangler.toml bindings live — the nonce Durable Object, the D1 database,
+// the wrangler.jsonc bindings live — the nonce Durable Object, the D1 database,
 // and the WASM-loading Worker entry — so the Durable Object burn and the D1
 // recall/persist round-trips are exercised against the actual runtime, not a
 // fake. There is no CF account here, but miniflare needs none (local-only per
@@ -26,7 +26,7 @@ export default defineWorkersConfig(async () => {
           // One miniflare instance for the suite; per-test isolated storage
           // still resets D1/DO state between tests.
           singleWorker: true,
-          wrangler: { configPath: './wrangler.toml' },
+          wrangler: { configPath: './wrangler.jsonc' },
           miniflare: {
             // Required by the Workers pool; harmless for this Worker.
             compatibilityFlags: ['nodejs_compat'],

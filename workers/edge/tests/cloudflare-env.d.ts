@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers" />
 
 // Types for the `env` exposed by the miniflare-backed Workers test pool: the
-// PCF4 state bindings from wrangler.toml plus the migrations the setup file
+// PCF4 state bindings from wrangler.jsonc plus the migrations the setup file
 // applies. Only the `*.workers.test.ts` suite (real workerd) uses these.
 
 import type { D1Migration } from 'cloudflare:test'
