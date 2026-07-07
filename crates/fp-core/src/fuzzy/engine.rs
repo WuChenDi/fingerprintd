@@ -108,6 +108,39 @@ impl FuzzyStore {
     /// without updating it (anti-poisoning, §7); a new device is minted and
     /// stored. `now_ms` is Unix milliseconds for the stored timestamps.
     pub fn identify(&self, components: &Value, now_ms: u64) -> MatchOutcome {
+        let outcome = self.evaluate(components);
+        // Persist per the verdict (design §7): a confirmed match drifts the
+        // winning template toward this observation and a new device is stored
+        // under its freshly minted id; a review-band hit leaves the template
+        // untouched (anti-poisoning).
+        match outcome.decision {
+            Decision::Match | Decision::NewDevice => {
+                self.observe(&outcome.visitor_id, components, now_ms);
+            }
+            Decision::Review => {}
+        }
+        outcome
+    }
+
+    /// Score `components` and decide, **without mutating** the store (design §5).
+    ///
+    /// The pure half of [`identify`]: stage-one recall, Fellegi–Sunter scoring,
+    /// and the double-threshold decision. It returns the same [`MatchOutcome`]
+    /// `identify` would but leaves the record library, blocking index, and
+    /// frequency table untouched — the entry point a stateless edge host calls
+    /// to obtain a verdict before performing its own persistence (D1/DO
+    /// write-back) per the returned [`Decision`].
+    pub fn score(&self, components: &Value) -> MatchOutcome {
+        self.evaluate(components)
+    }
+
+    /// Stage-one recall + stage-two scoring + decision for `components`, with no
+    /// side effects. Shared by [`identify`] (which then persists) and [`score`]
+    /// (which does not).
+    ///
+    /// [`identify`]: FuzzyStore::identify
+    /// [`score`]: FuzzyStore::score
+    fn evaluate(&self, components: &Value) -> MatchOutcome {
         let probe = self.stored_map(components);
 
         // Stage one: recall, then score every candidate against the probe.
@@ -149,8 +182,6 @@ impl FuzzyStore {
             (Decision::Match, Some((id, top))) => {
                 let collision_risk =
                     second_score.is_some_and(|s2| s2 >= T_HI && (top.score - s2) < COLLISION_GAP);
-                // High-confidence match: drift the template toward this observation (§7).
-                self.observe(id, components, now_ms);
                 MatchOutcome {
                     visitor_id: id.clone(),
                     is_new_device: false,
@@ -161,21 +192,17 @@ impl FuzzyStore {
                     collision_risk,
                 }
             }
-            (Decision::Review, Some((id, _))) => {
-                // Suspected only: no template update, to resist poisoning (§7).
-                MatchOutcome {
-                    visitor_id: id.clone(),
-                    is_new_device: false,
-                    confidence,
-                    decision,
-                    score: best_score,
-                    compared_components: compared,
-                    collision_risk: false,
-                }
-            }
+            (Decision::Review, Some((id, _))) => MatchOutcome {
+                visitor_id: id.clone(),
+                is_new_device: false,
+                confidence,
+                decision,
+                score: best_score,
+                compared_components: compared,
+                collision_risk: false,
+            },
             _ => {
                 let id = derive_visitor_id(components);
-                self.observe(&id, components, now_ms);
                 MatchOutcome {
                     visitor_id: id,
                     is_new_device: true,

@@ -22,6 +22,9 @@
 pub mod blocking;
 pub mod component;
 pub mod engine;
+// The offline evaluation harness replays fixtures through a random-salt store; it
+// is a native tuning tool, not edge compute, so the WASM build omits it.
+#[cfg(feature = "rng")]
 pub mod eval;
 pub mod frequency;
 pub mod minhash;
@@ -60,6 +63,7 @@ pub struct FuzzyStore {
     frequency: FrequencyTable,
 }
 
+#[cfg(feature = "rng")]
 impl Default for FuzzyStore {
     fn default() -> Self {
         Self::new()
@@ -68,12 +72,30 @@ impl Default for FuzzyStore {
 
 impl FuzzyStore {
     /// Build an empty store with a fresh random salt and permutation family.
+    #[cfg(feature = "rng")]
     pub fn new() -> Self {
         Self {
             salt: Salt::random(),
             records: RecordStore::new(),
             blocking: BlockingIndex::new(),
             minhash: MinHashLsh::new(),
+            frequency: FrequencyTable::new(),
+        }
+    }
+
+    /// Build an empty store with a **deterministic** salt and permutation family
+    /// derived from `secret`.
+    ///
+    /// Unlike [`FuzzyStore::new`] (per-instance random), this yields identical
+    /// stored hashes and blocking keys across processes for the same secret —
+    /// the contract a stateless edge host relies on so keys persisted on one
+    /// request match those derived on another (WASM edge compute, `crates/fp-wasm`).
+    pub fn deterministic(secret: &[u8]) -> Self {
+        Self {
+            salt: Salt::from_secret(secret),
+            records: RecordStore::new(),
+            blocking: BlockingIndex::new(),
+            minhash: MinHashLsh::from_seed(secret),
             frequency: FrequencyTable::new(),
         }
     }
@@ -106,6 +128,20 @@ impl FuzzyStore {
     pub fn candidates(&self, components: &Value) -> HashSet<String> {
         let stored = self.stored_map(components);
         self.blocking.candidates(&self.blocking_keys(&stored))
+    }
+
+    /// The blocking keys for `components`, hex-encoded (design §4).
+    ///
+    /// The hex form of each [`blocking::BlockingKey`] a stateless host queries
+    /// its externalized candidate index with. Key derivation depends on the salt
+    /// and the `MinHash` permutation family, so a [`FuzzyStore::deterministic`]
+    /// store yields keys that are stable across isolate instances.
+    pub fn blocking_key_hexes(&self, components: &Value) -> Vec<String> {
+        let stored = self.stored_map(components);
+        self.blocking_keys(&stored)
+            .iter()
+            .map(hex::encode)
+            .collect()
     }
 
     /// Convert a raw JSON component object into its stored-form map, dropping
