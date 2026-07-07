@@ -16,6 +16,8 @@
  * every `/identify` resolves to a new device. Both are replaced in PCF4.
  */
 
+import type { ScoreOutcome } from './types'
+
 /** The outcome of consuming a nonce, mirroring `fp_core::nonce::NonceOutcome`.
  *  Only `valid` admits the request; every other value yields `401`. */
 export type NonceOutcome = 'valid' | 'expired' | 'reused' | 'unknown'
@@ -37,11 +39,32 @@ export interface Candidate {
   components: Record<string, unknown>
 }
 
-/** Recalls candidate templates for a probe's blocking keys. Implemented here as
- *  an empty stub; by a D1 inverted-index query in PCF4. */
+/**
+ * The fingerprint library behind stage-one recall and drift persistence:
+ * recalls candidate templates for a probe's blocking keys and folds an
+ * observation back in per the scorer's verdict. Implemented here as an empty
+ * stub; by the D1-backed template + blocking index in PCF4.
+ */
 export interface CandidateSource {
   /** Fetch every stored template sharing any of `blockingKeys`. */
   recall(blockingKeys: string[]): Promise<Candidate[]>
+
+  /**
+   * Fold an observation into the library per the scorer's `outcome`, mirroring
+   * `fp_core::fuzzy::FuzzyStore::identify`'s persistence (design §7):
+   *   - `match`      — drift the matched template toward `components` and index
+   *                    the observed `blockingKeys` under its id.
+   *   - `new_device` — store the freshly minted template and index its keys.
+   *   - `review`     — no write (anti-poisoning).
+   * `blockingKeys` are the keys derived from `components`; `nowMs` stamps
+   * freshness. A `review` verdict is a no-op.
+   */
+  persist(
+    outcome: ScoreOutcome,
+    components: Record<string, unknown>,
+    blockingKeys: string[],
+    nowMs: number,
+  ): Promise<void>
 }
 
 /**
@@ -73,10 +96,14 @@ export class InMemoryNonceStore implements NonceStore {
   }
 }
 
-/** Candidate source that always recalls nothing (STUB) — every probe is judged a
- *  new device. Replaced by the D1-backed index in PCF4. */
+/** Candidate source that always recalls nothing and never persists (STUB) —
+ *  every probe is judged a new device. Replaced by the D1-backed index in PCF4. */
 export class EmptyCandidateSource implements CandidateSource {
   recall(_blockingKeys: string[]): Promise<Candidate[]> {
     return Promise.resolve([])
+  }
+
+  persist(): Promise<void> {
+    return Promise.resolve()
   }
 }

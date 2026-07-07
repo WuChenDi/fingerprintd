@@ -120,12 +120,14 @@ async function handleIdentify(request: Request, deps: Deps): Promise<Response> {
   }
 
   // Host I/O orchestration: derive blocking keys → recall the candidate block
-  // → score. With the STUBBED candidate source this recalls nothing, so every
-  // probe resolves to a new device; the flow is identical once D1 lands (PCF4).
+  // → score → persist the verdict. The engine is pure; the host owns state, so
+  // it writes back per the decision (drift a match, mint a new device, leave a
+  // review untouched) — mirroring `fp_core`'s `identify`.
   const components = req.stable_components
   const blockingKeys = deps.engine.blockingKeys(components)
   const candidates = await deps.candidates.recall(blockingKeys)
   const outcome = deps.engine.score(components, candidates)
+  await deps.candidates.persist(outcome, components, blockingKeys, now)
 
   // The engine returns the pure match verdict; the passive-signal summary is a
   // host concern. The JA4/IP fusion (`crates/fingerprintd/src/signals.rs`) is
