@@ -27,7 +27,9 @@ pub mod frequency;
 pub mod minhash;
 pub mod record;
 
+pub use blocking::CandidateSource;
 pub use engine::{Decision, MatchOutcome};
+pub use record::FingerprintStore;
 
 use std::collections::{BTreeMap, HashSet};
 

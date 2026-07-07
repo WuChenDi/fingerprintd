@@ -22,6 +22,21 @@ pub type BlockingKey = [u8; 32];
 /// left to stage-two scoring to disambiguate (design §4).
 pub const DEFAULT_MAX_BLOCK: usize = 1024;
 
+/// Storage contract for stage-one candidate recall: the `key → set<visitorId>`
+/// inverted index (design §4/§11).
+///
+/// The in-memory [`BlockingIndex`] is the single-instance implementation. An
+/// externalized backend (a Cloudflare D1 table of `(key, visitorId)` rows, a
+/// later step) lives behind the same contract, so the engine recalls candidates
+/// without knowing where the index is stored.
+pub trait CandidateSource: Send + Sync {
+    /// Index `visitor` under `key`.
+    fn insert(&self, key: BlockingKey, visitor: &str);
+
+    /// Union of visitors across every supplied `key` — the candidate set (§4).
+    fn candidates(&self, keys: &[BlockingKey]) -> HashSet<String>;
+}
+
 /// Inverted index mapping each blocking key to the visitors that hash into it.
 #[derive(Debug)]
 pub struct BlockingIndex {
@@ -94,6 +109,16 @@ impl BlockingIndex {
     /// Lock the index, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<BlockingKey, HashSet<String>>> {
         self.index.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl CandidateSource for BlockingIndex {
+    fn insert(&self, key: BlockingKey, visitor: &str) {
+        BlockingIndex::insert(self, key, visitor);
+    }
+
+    fn candidates(&self, keys: &[BlockingKey]) -> HashSet<String> {
+        BlockingIndex::candidates(self, keys)
     }
 }
 

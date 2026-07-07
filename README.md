@@ -23,7 +23,7 @@ nonce-challenge collector, and a Rust/WASM probe core (`crates/fp-wasm`).
 
 Verified test counts:
 
-- **Server: 85** — `cargo nextest run -p fingerprintd`
+- **Core + server: 85** — `cargo nextest run` (46 in `fp-core`, 39 in `fingerprintd`)
 - **Client: 34** — `vitest` (in `clients/web`)
 - **WASM: 3** — `cargo test -p fp-wasm`
 
@@ -36,6 +36,7 @@ is deferred to a human — see `clients/web/README.md`.
 ```
 Cargo.toml                       # workspace root (edition 2024, lints, deps)
 crates/
+  fp-core/                       # framework-free compute + storage traits (shared)
   fingerprintd/                  # Axum server (challenge / identify / matching)
   fp-wasm/                       # Rust/WASM probe core
 clients/
