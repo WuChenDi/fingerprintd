@@ -18,6 +18,7 @@ name = "fingerprintd"
 path = "src/lib.rs"
 
 [dependencies]
+fp-core = { path = "../fp-core" }
 tokio = { workspace = true }
 axum  = { workspace = true }
 serde = { workspace = true }
@@ -25,10 +26,7 @@ serde_json = { workspace = true }
 figment = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-async-trait = { workspace = true }
-rand = { workspace = true }
 sha2 = { workspace = true }
-hmac = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
