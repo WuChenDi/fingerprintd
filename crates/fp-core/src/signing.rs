@@ -1,4 +1,4 @@
-//! Response signing — tamper-evident `/identify` responses (PRD §4.1, P3).
+//! Response signing — tamper-evident `/identify` responses (architecture §4.1, P3).
 //!
 //! When a signing key is configured (`config.response_signing_key`), each
 //! successful `POST /identify` carries two headers:

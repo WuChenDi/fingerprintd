@@ -3,7 +3,7 @@
  * so FingerprintJS/BotD are MOCKED: we inject fake loaders (and, once, mock the
  * modules themselves) and assert the WIRING, never real fingerprint values.
  *
- * Contract under test (PRD §4.1 / §4.4):
+ * Contract under test (architecture §4.1 / §4.4):
  *  - raw FingerprintJS components are passed through into `stable_components`;
  *  - the FingerprintJS `visitorId`/hash is DISCARDED (never in the payload);
  *  - BotD detection + signals are present under `stable_components.botd`;
@@ -111,7 +111,7 @@ describe('createFingerprintCollector', () => {
     expect(Object.keys(collected)).toEqual(['stable_components'])
   })
 
-  it('does not mix the challenge nonce into stable_components (PRD §4.1)', async () => {
+  it('does not mix the challenge nonce into stable_components (architecture §4.1)', async () => {
     const collect = createFingerprintCollector({
       loadFingerprint: fakeFingerprint({ ua: { value: 'x' } }),
       loadBotd: fakeBotd({ bot: false }, {}),

@@ -3,7 +3,7 @@
  * components + BotD signals. This is the "who is this device" evidence the
  * SERVER matches on — it is NOT a verdict.
  *
- * DESIGN (PRD §4.1 / §4.4):
+ * DESIGN (architecture §4.1 / §4.4):
  *  - We take FingerprintJS's RAW `components` and DISCARD its `visitorId`/hash.
  *    The client never ships a client-side id; the authoritative visitorId is
  *    whatever the server returns from `/identify`.
@@ -56,7 +56,7 @@ export interface FingerprintCollectorDeps {
  * Build a real {@link Collector} over FingerprintJS + BotD.
  *
  * The returned collector ignores the challenge (the stable half is nonce-free
- * by design — PRD §4.1) and produces only `stable_components`:
+ * by design — architecture §4.1) and produces only `stable_components`:
  *  - every FingerprintJS component, ADAPTED to the server matching schema
  *    (audit H5 — {@link adaptFingerprintComponents} unwraps the FJS
  *    `{ value, duration }` wrapper and renames keys; a verbatim spread would be
@@ -74,7 +74,7 @@ export function createFingerprintCollector(
   return async (): Promise<Collected> => {
     const agent = await loadFingerprint()
     // Take the RAW components only; the `visitorId` hash is intentionally
-    // discarded (PRD §4.4 — the client-side verdict is thrown away).
+    // discarded (architecture §4.4 — the client-side verdict is thrown away).
     const { components } = await agent.get()
 
     const detector = await load()

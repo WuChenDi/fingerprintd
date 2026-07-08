@@ -1,10 +1,10 @@
 //! `fingerprintd` — server-side device fingerprinting service.
 //!
 //! This crate hosts the HTTP surface. The router is built by [`build_router`]
-//! and exposes the challenge/response identification flow (PRD §5):
+//! and exposes the challenge/response identification flow (architecture §5):
 //! `GET /challenge` mints a one-time nonce and `POST /identify` consumes it,
 //! rejecting expired or replayed nonces before running the weighted fuzzy
-//! matching engine (design §4/§5) to resolve the device.
+//! matching engine (fuzzy-matching §4/§5) to resolve the device.
 
 #![forbid(unsafe_code)]
 
@@ -41,7 +41,7 @@ use crate::{
 ///
 /// Mounts:
 /// - `GET /health` — liveness probe, always `200 OK`.
-/// - `GET /challenge` — issue a one-time nonce (PRD §5).
+/// - `GET /challenge` — issue a one-time nonce (architecture §5).
 /// - `POST /identify` — consume the nonce and resolve the device.
 /// - `DELETE /visitor/{id}` — GDPR erasure, admin-key gated (finding M6).
 pub fn build_router(state: AppState) -> Router {
@@ -62,7 +62,7 @@ async fn health() -> StatusCode {
 async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
     let nonce = state.nonce_store.issue().await;
     // Advertise the nonce-probe transform only when probe enforcement is on, so
-    // a probe-capable client knows to compute it (T8, PRD §4.1 pt 3).
+    // a probe-capable client knows to compute it (T8, architecture §4.1 pt 3).
     let verify = state.probe.as_ref().map(|_| ProbeDescriptor::advertised());
     Json(ChallengeResponse {
         collect: Collect {
@@ -83,10 +83,10 @@ async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
 /// A non-[`NonceOutcome::Valid`] nonce (expired, reused, or unknown) yields
 /// `401` before any matching runs. On success the response carries the resolved
 /// `visitorId` and the weighted engine's computed `confidence`, decision, and
-/// collision flag (design §5/§6).
+/// collision flag (fuzzy-matching §5/§6).
 ///
 /// The `headers` are read for the edge-injected passive signals (real client IP
-/// and TLS JA4, PRD §4.2). They fuse into `confidence` **only** — never the
+/// and TLS JA4, architecture §4.2). They fuse into `confidence` **only** — never the
 /// `visitorId` — and are trusted only behind a trusted edge (see
 /// [`AppState::trust_edge_headers`]); a directly-reachable origin ignores any
 /// client-supplied copy.
@@ -97,7 +97,7 @@ async fn identify(
 ) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
-            // Depth check on top of the one-time nonce (T8, PRD §4.1 pt 3): when
+            // Depth check on top of the one-time nonce (T8, architecture §4.1 pt 3): when
             // a probe key is configured, require a correct `probe` proving the
             // caller ran the advertised transform over this fresh nonce with the
             // shared key. A missing or forged probe is rejected before matching.
@@ -113,7 +113,7 @@ async fn identify(
 
             let now = now_ms();
 
-            // Timestamp window (T9, PRD §4.1): when enabled, bound how long a
+            // Timestamp window (T9, architecture §4.1): when enabled, bound how long a
             // captured payload stays replayable by requiring the client `ts` to
             // sit within the configured skew of server time. Fail-closed once
             // enabled: a missing or out-of-window `ts` is rejected before matching.
@@ -130,7 +130,7 @@ async fn identify(
 
             // Cross-check the client-reported UA against the unforgeable
             // edge-observed TLS stack / IP. Trust edge headers only behind a
-            // trusted edge; otherwise ignore any client-supplied copy (PRD §4.2
+            // trusted edge; otherwise ignore any client-supplied copy (architecture §4.2
             // trusted-header requirement) — an untrusted request auto-degrades.
             let intel = StaticIpIntel::new();
             let claimed_ua = claimed_ua(&req.stable_components);
@@ -143,7 +143,7 @@ async fn identify(
             let signals = signals::extract(trusted_headers, claimed_ua, &intel);
 
             // Fuse the passive adjustment into confidence, clamped to [0, 1]
-            // (design §6). The visitorId and decision are unchanged.
+            // (fuzzy-matching §6). The visitorId and decision are unchanged.
             let confidence = (outcome.confidence + signals.confidence_adjustment()).clamp(0.0, 1.0);
 
             tracing::debug!(
@@ -180,7 +180,7 @@ async fn identify(
 }
 
 /// `DELETE /visitor/{id}` — erase a visitor from the fingerprint library (GDPR
-/// right-to-be-forgotten, finding M6, PRD §7).
+/// right-to-be-forgotten, finding M6, architecture §7).
 ///
 /// **Fail-closed** auth:
 /// - No `admin_key` configured ⇒ the endpoint is disabled ⇒ `404 NOT_FOUND`.
@@ -254,7 +254,7 @@ fn now_ms() -> u64 {
 }
 
 /// Whether a client `ts` (Unix milliseconds) sits within `±skew_ms` of the
-/// server's `now_ms` (T9, PRD §4.1). Widened to `i128` so a future timestamp or
+/// server's `now_ms` (T9, architecture §4.1). Widened to `i128` so a future timestamp or
 /// a pre-epoch clock cannot overflow or wrap the subtraction.
 fn ts_in_window(client_ts: i64, now_ms: u64, skew_ms: u64) -> bool {
     (i128::from(now_ms) - i128::from(client_ts)).abs() <= i128::from(skew_ms)
@@ -304,7 +304,7 @@ const STABLE_PROBES: &[&str] = &["userAgent", "languages", "timezone", "platform
 /// Active challenge targets seeded with the nonce.
 const CHALLENGE_TARGETS: &[&str] = &["canvas", "audio"];
 
-/// `GET /challenge` response body (PRD §5).
+/// `GET /challenge` response body (architecture §5).
 #[derive(Debug, Serialize)]
 struct ChallengeResponse {
     /// The one-time nonce the client must echo on `identify`.
@@ -337,7 +337,7 @@ struct ChallengeProbe {
     verify: Option<ProbeDescriptor>,
 }
 
-/// Advertised nonce-probe transform (T8, PRD §4.1 pt 3): the client computes
+/// Advertised nonce-probe transform (T8, architecture §4.1 pt 3): the client computes
 /// `encoding(alg(shared_key, input))` — `hex(HMAC-SHA256(shared_key, nonce))` —
 /// and returns it as `probe`. The shared key is not advertised; only the
 /// transform is.
@@ -378,11 +378,11 @@ struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
     nonce: String,
     /// Nonce-probe response: `hex(HMAC-SHA256(shared_key, nonce))`, as advertised
-    /// by `GET /challenge` (T8, PRD §4.1 pt 3). Required and verified only when a
+    /// by `GET /challenge` (T8, architecture §4.1 pt 3). Required and verified only when a
     /// probe key is configured; a missing or wrong value then yields `401`.
     #[serde(default)]
     probe: Option<String>,
-    /// Client timestamp in Unix milliseconds (T9, PRD §4.1/§5). Required and
+    /// Client timestamp in Unix milliseconds (T9, architecture §4.1/§5). Required and
     /// checked against `±ts_skew_secs` only when `enforce_ts_window` is on; a
     /// missing or out-of-window value then yields `401`. Ignored otherwise.
     #[serde(default)]
@@ -391,13 +391,13 @@ struct IdentifyRequest {
     stable_components: Value,
 }
 
-/// `POST /identify` success body (PRD §5).
+/// `POST /identify` success body (architecture §5).
 #[derive(Debug, Serialize)]
 struct IdentifyResponse {
     /// Stable device identifier.
     #[serde(rename = "visitorId")]
     visitor_id: String,
-    /// Fused match confidence in `[0.0, 1.0]` (design §6). This is **decision
+    /// Fused match confidence in `[0.0, 1.0]` (fuzzy-matching §6). This is **decision
     /// confidence, not identity trust** (finding M3): a first-ever `new_device`
     /// can report a high confidence (confidently unrecognized) while its identity
     /// is unestablished — key trust off `is_new_device` / `decision`, not this
@@ -406,16 +406,16 @@ struct IdentifyResponse {
     /// Whether this device was newly recorded.
     is_new_device: bool,
     /// Verdict from the weighted engine: `match`, `review`, or `new_device`
-    /// (design §5.4).
+    /// (fuzzy-matching §5.4).
     decision: &'static str,
     /// Set when a runner-up candidate also cleared the match threshold within
-    /// the collision margin (design §5.4).
+    /// the collision margin (fuzzy-matching §5.4).
     collision_risk: bool,
-    /// Passive network-signal risk summary for downstream consumers (PRD §5).
+    /// Passive network-signal risk summary for downstream consumers (architecture §5).
     signals: Signals,
 }
 
-/// Passive-signal risk summary surfaced to consumers (PRD §5): the UA/TLS
+/// Passive-signal risk summary surfaced to consumers (architecture §5): the UA/TLS
 /// consistency verdict and the coarse IP reputation band, derived from the
 /// edge-observed signals (`crate::signals`).
 #[derive(Debug, Serialize)]
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(third["is_new_device"], json!(true));
     }
 
-    // --- Passive-signal fusion (T7 / design §6, PRD §4.2) ---
+    // --- Passive-signal fusion (T7 / fuzzy-matching §6, architecture §4.2) ---
 
     use crate::signals::{CF_CONNECTING_IP, JA4_HEADER};
 
@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(untrusted["signals"]["ua_tls_consistent"], json!(true));
     }
 
-    // --- Nonce probe verification (T8 / PRD §4.1 pt 3) ---
+    // --- Nonce probe verification (T8 / architecture §4.1 pt 3) ---
 
     use crate::probe::{PROBE_ALG, ProbeVerifier};
 
@@ -864,7 +864,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    // --- Response signature + timestamp window (T9 / PRD §4.1) ---
+    // --- Response signature + timestamp window (T9 / architecture §4.1) ---
 
     use crate::signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER};
 

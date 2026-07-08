@@ -332,7 +332,7 @@ describe('passive signals (edge JA4/IP fusion, M2)', () => {
       'cf-bot-management-ja4': BROWSER_JA4,
     })
     expect(consistent.signals.ua_tls_consistent).toBe(true)
-    // The consistency boost (design §6) lifts confidence above the degraded base.
+    // The consistency boost (fuzzy-matching §6) lifts confidence above the degraded base.
     expect(consistent.confidence).toBeGreaterThan(degraded.confidence)
   })
 
@@ -342,7 +342,7 @@ describe('passive signals (edge JA4/IP fusion, M2)', () => {
     const forgery = await identifyWith(deps, {
       'cf-bot-management-ja4': AUTOMATION_JA4,
     })
-    // The anti-forgery core (PRD §4.2): Chrome UA riding an automation TLS stack.
+    // The anti-forgery core (architecture §4.2): Chrome UA riding an automation TLS stack.
     expect(forgery.signals.ua_tls_consistent).toBe(false)
     expect(forgery.confidence).toBeLessThan(degraded.confidence)
   })

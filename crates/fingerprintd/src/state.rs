@@ -20,7 +20,7 @@ pub struct AppState {
     pub matcher: Arc<FuzzyStore>,
     /// Nonce lifetime advertised to clients as `expires_in`.
     pub nonce_ttl_secs: u64,
-    /// Whether edge-injected passive-signal headers are trusted (PRD §4.2). When
+    /// Whether edge-injected passive-signal headers are trusted (architecture §4.2). When
     /// `false`, `/identify` ignores client-supplied `CF-Connecting-IP` /
     /// `cf-bot-management-ja4` copies (fail-closed).
     pub trust_edge_headers: bool,

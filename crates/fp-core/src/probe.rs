@@ -1,4 +1,4 @@
-//! Nonce probe verification — the freshness-proof depth layer (PRD §4.1 pt 3).
+//! Nonce probe verification — the freshness-proof depth layer (architecture §4.1 pt 3).
 //!
 //! `GET /challenge` advertises a deterministic transform of the one-time nonce
 //! (HMAC-SHA256, hex-encoded). A probe-capable client recomputes the transform

@@ -4,7 +4,7 @@
  *
  *   { stable_components, probe?, ts }
  *
- * DESIGN (PRD §4.1):
+ * DESIGN (architecture §4.1):
  *  - STABLE half (TC2, `createFingerprintCollector`) — the "who is this device"
  *    matching input.
  *  - PROBE (TC4 WASM, `wasmProbeFn`) — `hex(HMAC-SHA256(key, nonce))` (T8),

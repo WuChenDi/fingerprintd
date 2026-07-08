@@ -1,11 +1,11 @@
-//! Passive network-signal compute (PRD §4.2 / §4.4 / §6).
+//! Passive network-signal compute (architecture §4.2 / §4.4 / §6).
 //!
 //! Client-reported `components` are forgeable: a headless browser can self-report
 //! any `userAgent` it likes. This module derives the signals a client **cannot**
 //! self-report — the real network IP and the TLS JA3/JA4 stack — and cross-checks
 //! the TLS stack against the JS/UA-claimed browser. The result feeds `/identify`
 //! **confidence only**, never the `visitorId` (JA4 is low-entropy and forgeable,
-//! PRD §4.2).
+//! architecture §4.2).
 //!
 //! This is the framework-free compute: it takes plain values (the JA4 string, the
 //! client IP string, the claimed UA), never an HTTP framework type, so every
@@ -22,7 +22,7 @@
 //!   mandated **auto-degrade** path: a missing connection-layer signal must not
 //!   block or penalise the request (§4.2).
 //!
-//! **Trust boundary (PRD §4.2 security requirement):** the JA4 signal is trusted
+//! **Trust boundary (architecture §4.2 security requirement):** the JA4 signal is trusted
 //! only when injected by the Cloudflare edge; the origin must strip any
 //! client-supplied copy before this module runs. Enforcing that strip is handler
 //! /edge wiring (T7); this module only consumes whatever trusted values it is given.
@@ -46,13 +46,13 @@ const BROWSER_MIN_CIPHERS: u32 = 10;
 const BROWSER_MIN_EXTENSIONS: u32 = 10;
 
 /// Confidence boost when the UA claim and the observed TLS stack agree — a small
-/// positive nudge toward "real browser" (design §6, "一致 → 加成").
+/// positive nudge toward "real browser" (fuzzy-matching §6, "一致 → 加成").
 const CONSISTENT_BOOST: f64 = 0.05;
 /// Confidence penalty when the UA claim contradicts the observed TLS stack — the
-/// strong anti-forgery downgrade (design §6 / PRD §4.2, "不一致 → 大幅下调").
+/// strong anti-forgery downgrade (fuzzy-matching §6 / architecture §4.2, "不一致 → 大幅下调").
 const MISMATCH_PENALTY: f64 = 0.5;
 
-/// Coarse IP reputation band surfaced to downstream risk consumers (PRD §5).
+/// Coarse IP reputation band surfaced to downstream risk consumers (architecture §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpRisk {
     /// Residential / unknown / internal address — no adverse signal.
@@ -76,7 +76,7 @@ impl IpRisk {
 }
 
 /// Verdict of cross-checking the JS/UA-claimed browser against the passively
-/// observed TLS (JA3/JA4) stack (PRD §4.2 / §6).
+/// observed TLS (JA3/JA4) stack (architecture §4.2 / §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TlsConsistency {
     /// UA and TLS stack agree — a plausibly real browser (confidence boost).
@@ -99,7 +99,7 @@ impl TlsConsistency {
         }
     }
 
-    /// The boolean `ua_tls_consistent` flag for the response body (PRD §5).
+    /// The boolean `ua_tls_consistent` flag for the response body (architecture §5).
     ///
     /// Only an outright [`Mismatch`] flags as inconsistent; a [`Degraded`] read
     /// carries no evidence of forgery, so it reports consistent-by-default and
@@ -112,7 +112,7 @@ impl TlsConsistency {
     }
 }
 
-/// The passive signals extracted for one request (PRD §5 `signals`), fed to the
+/// The passive signals extracted for one request (architecture §5 `signals`), fed to the
 /// confidence fusion (§6) — never to the `visitorId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PassiveSignals {
@@ -124,12 +124,12 @@ pub struct PassiveSignals {
 
 impl PassiveSignals {
     /// The passive-signal confidence adjustment fused into `/identify` confidence
-    /// (design §6). The caller adds this to the engine's base confidence and
+    /// (fuzzy-matching §6). The caller adds this to the engine's base confidence and
     /// clamps to `[0, 1]`; positive boosts, negative downgrades.
     ///
     /// Only the UA-vs-TLS consistency verdict moves confidence: agreement gives a
     /// small [`CONSISTENT_BOOST`], an outright [`TlsConsistency::Mismatch`] gives
-    /// the strong [`MISMATCH_PENALTY`] downgrade (the anti-forgery core, PRD §4.2),
+    /// the strong [`MISMATCH_PENALTY`] downgrade (the anti-forgery core, architecture §4.2),
     /// and a [`TlsConsistency::Degraded`] read is neutral — a missing connection
     /// signal never penalises (auto-degrade, §4.2). The [`IpRisk`] band is
     /// auxiliary and surfaced to downstream risk consumers (§5), not folded into
@@ -157,7 +157,7 @@ enum ClientStack {
 
 /// IP reputation lookup: maps a real client IP to a coarse [`IpRisk`] band.
 ///
-/// The passive IP signal is auxiliary, not decisive (PRD §4.2). Implementations
+/// The passive IP signal is auxiliary, not decisive (architecture §4.2). Implementations
 /// are the seam for a real ASN / proxy / reputation feed; [`StaticIpIntel`] is the
 /// dependency-free placeholder.
 pub trait IpIntel: Send + Sync {

@@ -1,13 +1,13 @@
-//! Offline evaluation harness for the matching engine (design §10).
+//! Offline evaluation harness for the matching engine (fuzzy-matching §10).
 //!
-//! The design gates the PRD §3 targets (stability ≥ 95 %, collision ≤ 1 %)
+//! The design gates the architecture §3 targets (stability ≥ 95 %, collision ≤ 1 %)
 //! behind an offline evaluation against a **labelled** set: observations tagged
 //! with a ground-truth `deviceId` (login state / long-lived cookie). This module
 //! defines that fixture format, replays it through [`FuzzyStore::identify`], and
 //! reports the two headline metrics:
 //!
 //! - **stability rate** — of all same-device revisits, the fraction re-resolved
-//!   to that device's own `visitorId` (design §10 稳定率).
+//!   to that device's own `visitorId` (fuzzy-matching §10 稳定率).
 //! - **collision rate** — of all observations, the fraction merged onto a
 //!   `visitorId` first minted by a *different* ground-truth device (碰撞率).
 //!
@@ -19,7 +19,7 @@
 //!
 //! TODO(real-data): replace [`synthetic`] with a real labelled corpus (design
 //! §10 ground truth) and grid-search `T_lo / T_hi / τ` and the component priors
-//! before claiming the PRD §3 95 %/1 % numbers. The rates this harness prints on
+//! before claiming the architecture §3 95 %/1 % numbers. The rates this harness prints on
 //! synthetic input MUST NOT be reported as the production stability/collision
 //! figures.
 
@@ -31,7 +31,7 @@ use serde_json::Value;
 use super::FuzzyStore;
 
 /// A labelled evaluation fixture: observations grouped by ground-truth device
-/// (design §10). Every observation under one [`DeviceGroup`] is the *same*
+/// (fuzzy-matching §10). Every observation under one [`DeviceGroup`] is the *same*
 /// physical device across visits; distinct groups are distinct devices.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Fixture {
@@ -50,7 +50,7 @@ pub struct DeviceGroup {
     pub observations: Vec<Value>,
 }
 
-/// Headline evaluation metrics over one fixture replay (design §10).
+/// Headline evaluation metrics over one fixture replay (fuzzy-matching §10).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EvalReport {
     /// Observations replayed through the engine.
@@ -72,7 +72,7 @@ pub struct EvalReport {
 }
 
 impl EvalReport {
-    /// Stability rate = stable revisits / revisits (design §10 稳定率).
+    /// Stability rate = stable revisits / revisits (fuzzy-matching §10 稳定率).
     ///
     /// Returns `1.0` when there are no revisits (nothing to re-link).
     #[allow(clippy::cast_precision_loss)] // fixture-sized counts; precision loss immaterial
@@ -83,7 +83,7 @@ impl EvalReport {
         self.stable_links as f64 / self.revisits as f64
     }
 
-    /// Collision rate = cross-device merges / observations (design §10 碰撞率).
+    /// Collision rate = cross-device merges / observations (fuzzy-matching §10 碰撞率).
     #[allow(clippy::cast_precision_loss)] // fixture-sized counts; precision loss immaterial
     pub fn collision_rate(&self) -> f64 {
         if self.total_observations == 0 {
@@ -103,7 +103,7 @@ impl Fixture {
         serde_json::from_str(json)
     }
 
-    /// The bundled synthetic fixture (design §10 smoke test — see the module
+    /// The bundled synthetic fixture (fuzzy-matching §10 smoke test — see the module
     /// docs and the TODO on real data).
     ///
     /// # Errors
@@ -114,11 +114,11 @@ impl Fixture {
     }
 }
 
-/// The compiled-in synthetic fixture (design §10). Real labelled data is a
+/// The compiled-in synthetic fixture (fuzzy-matching §10). Real labelled data is a
 /// runtime input; this constant only backs the smoke test and example.
 const SYNTHETIC_FIXTURE: &str = include_str!("../../fixtures/eval/synthetic.json");
 
-/// Replay `fixture` through a fresh [`FuzzyStore`] and score it (design §10).
+/// Replay `fixture` through a fresh [`FuzzyStore`] and score it (fuzzy-matching §10).
 ///
 /// Observations are interleaved round-robin across devices and stamped with a
 /// monotonically increasing `now_ms`, so a device's revisit always arrives
@@ -221,11 +221,11 @@ mod tests {
         );
     }
 
-    /// Directional acceptance (design §10): on a synthetic set where same-device
+    /// Directional acceptance (fuzzy-matching §10): on a synthetic set where same-device
     /// visits drift only slightly and distinct devices disagree on every
     /// high-stability discriminant, the engine should re-link revisits and keep
     /// devices apart. These are DIRECTIONAL bounds on hand-authored data — they
-    /// assert the scoring is wired the right way round, NOT the PRD §3 95 %/1 %
+    /// assert the scoring is wired the right way round, NOT the architecture §3 95 %/1 %
     /// targets, which require the real labelled corpus (see module TODO).
     #[test]
     fn synthetic_eval_is_directionally_correct() {

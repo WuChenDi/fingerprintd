@@ -1,4 +1,4 @@
-//! HTTP-layer adapter for the passive network-signal compute (PRD §4.2 / §4.4 / §6).
+//! HTTP-layer adapter for the passive network-signal compute (architecture §4.2 / §4.4 / §6).
 //!
 //! The framework-free compute — the UA-vs-TLS consistency cross-check and the
 //! IP-reputation classification — lives in [`fp_core::signals`] so every
@@ -15,12 +15,12 @@ use fp_core::signals::compute;
 pub use fp_core::signals::{IpIntel, IpRisk, PassiveSignals, StaticIpIntel, TlsConsistency};
 
 /// Trusted request header carrying the real client IP, injected by the Cloudflare
-/// edge. Standard Cloudflare header (PRD §4.2).
+/// edge. Standard Cloudflare header (architecture §4.2).
 pub const CF_CONNECTING_IP: &str = "cf-connecting-ip";
 
 /// Trusted request header carrying the client TLS JA4 fingerprint, injected by
 /// the Cloudflare edge (Bot Management → Transform Rule). The origin MUST strip
-/// any client-supplied copy and trust only the edge-injected value (PRD §4.2);
+/// any client-supplied copy and trust only the edge-injected value (architecture §4.2);
 /// that strip is wired at the handler/edge layer (T7), not here.
 pub const JA4_HEADER: &str = "cf-bot-management-ja4";
 
