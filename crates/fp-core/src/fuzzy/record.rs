@@ -1,7 +1,7 @@
-//! The fingerprint library: `visitorId → template` records (design §3/§11).
+//! The fingerprint library: `visitorId → template` records (fuzzy-matching §3/§11).
 //!
 //! Each visitor keeps the most recent stored value per component (the template
-//! that drift updates in design §7 will refresh), a per-component freshness
+//! that drift updates in fuzzy-matching §7 will refresh), a per-component freshness
 //! timestamp, `first_seen` / `last_seen`, and an `observation_count`. Timestamps
 //! are supplied by the caller (Unix milliseconds) so the store stays clock-free
 //! and deterministic under test.
@@ -16,7 +16,7 @@ use std::{
 
 use super::component::Stored;
 
-/// A stored fingerprint template for one visitor (design §3).
+/// A stored fingerprint template for one visitor (fuzzy-matching §3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FingerprintRecord {
     /// Most recent stored value per component name.
@@ -32,7 +32,7 @@ pub struct FingerprintRecord {
 }
 
 /// Storage contract for the `visitorId → template` fingerprint library
-/// (design §3/§11).
+/// (fuzzy-matching §3/§11).
 ///
 /// The in-memory [`RecordStore`] is the single-instance implementation. An
 /// externalized backend (a Cloudflare D1 template table, a later step) lives
@@ -60,14 +60,14 @@ pub trait FingerprintStore: Send + Sync {
     }
 }
 
-/// In-memory `visitorId → record` fingerprint library (design §11).
+/// In-memory `visitorId → record` fingerprint library (fuzzy-matching §11).
 ///
 /// Bounded, fail-safe growth: an optional record cap evicts the least-recently
 /// seen (smallest `last_seen`) visitor once exceeded, and an optional TTL drops
 /// entries not seen within the window on the next `observe`. Both bounds are
 /// generous by default so a small workload behaves exactly as an unbounded
 /// store; every eviction is counted via [`RecordStore::evicted`], never silent
-/// (matching the blocking `dropped()` precedent, design §4).
+/// (matching the blocking `dropped()` precedent, fuzzy-matching §4).
 #[derive(Debug, Default)]
 pub struct RecordStore {
     /// `visitorId → template`.

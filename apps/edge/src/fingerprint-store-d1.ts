@@ -7,7 +7,7 @@
  * component object (the WASM engine re-salts it on recall, so no salted state is
  * stored here), and `blocking_index` is the `key -> visitorId` inverted index
  * recall unions over. Persistence mirrors the native `identify` verdict handling
- * (design §7): a match drifts the template, a new device stores a fresh one, a
+ * (fuzzy-matching §7): a match drifts the template, a new device stores a fresh one, a
  * review writes nothing.
  *
  * Queries go through Drizzle (`drizzle-orm/d1`); the emitted SQL is equivalent
@@ -26,7 +26,7 @@ import type { ScoreOutcome } from './types'
  * A hot blocking key (e.g. stock iPhone Safari) unions into a huge, low-information
  * block; leaving it unbounded means every candidate is re-scored in-isolate by WASM
  * plus its D1 read cost (P99 blowup). Bounding recall matches the native index,
- * whose per-block size cap drops over-capacity members (design §4). The edge has no
+ * whose per-block size cap drops over-capacity members (fuzzy-matching §4). The edge has no
  * metrics sink, so a truncated recall is surfaced via `console.warn` rather than a
  * dropped counter — the native "not silently truncated" rule, edge-shaped.
  */
@@ -48,7 +48,7 @@ export class D1FingerprintStore implements CandidateSource {
   }
 
   /**
-   * Union of every stored template sharing any of `blockingKeys` (design §4).
+   * Union of every stored template sharing any of `blockingKeys` (fuzzy-matching §4).
    * Empty keys ⇒ nothing to recall. `selectDistinct` collapses a visitor matched
    * by several keys to one candidate; the inner join drops any index row whose
    * template was not (yet) written. The union is bounded to `maxBlock`
@@ -82,7 +82,7 @@ export class D1FingerprintStore implements CandidateSource {
   }
 
   /**
-   * Fold the observation in per the verdict (design §7). A review is a no-op
+   * Fold the observation in per the verdict (fuzzy-matching §7). A review is a no-op
    * (anti-poisoning); a match drifts the matched template toward `components` by
    * a per-component merge (present values overwrite, absent ones are retained —
    * mirroring `RecordStore::observe`); a new device is stored whole. Either

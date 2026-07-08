@@ -31,7 +31,7 @@
 //! The browser-collector probe key is baked into this module at build time
 //! ([`PROBE_KEY`], overridable via the `FP_PROBE_KEY` compile-time env var).
 //! Because it ships inside the `.wasm` artifact, a determined attacker can
-//! extract it — this is **defense in depth, not a decisive control** (PRD: "WASM
+//! extract it — this is **defense in depth, not a decisive control** (architecture: "WASM
 //! 纵深防御，非决定性"). The one-time nonce remains the primary anti-replay
 //! guarantee; the probe only raises the bar against blind replay. In a real
 //! deployment the build injects the same secret configured as the server's

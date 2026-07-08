@@ -1,4 +1,4 @@
-//! Runnable offline evaluation harness (design §10).
+//! Runnable offline evaluation harness (fuzzy-matching §10).
 //!
 //! Replays a labelled fixture through the matching engine and prints the
 //! stability and collision rates. With no argument it runs the bundled
@@ -10,7 +10,7 @@
 //! cargo run --example eval -- path/to/labels.json  # real labelled data
 //! ```
 //!
-//! The synthetic numbers are a directional smoke test, NOT the PRD §3 targets
+//! The synthetic numbers are a directional smoke test, NOT the architecture §3 targets
 //! (≥95 % stability, ≤1 % collision); see `fuzzy::eval` for the real-data TODO.
 
 use std::process::ExitCode;
@@ -45,7 +45,7 @@ fn main() -> ExitCode {
 
     let report = evaluate(&fixture);
 
-    println!("fingerprintd offline evaluation (design §10)");
+    println!("fingerprintd offline evaluation (fuzzy-matching §10)");
     println!("  fixture:            {source}");
     println!("  devices:            {}", report.total_devices);
     println!("  observations:       {}", report.total_observations);
@@ -67,7 +67,7 @@ fn main() -> ExitCode {
     if path.is_none() {
         println!(
             "\nNOTE: synthetic fixture — directional smoke test only. These are NOT the\n\
-             PRD §3 production targets; run against a real labelled corpus to certify them."
+             architecture §3 production targets; run against a real labelled corpus to certify them."
         );
     }
 

@@ -9,7 +9,7 @@
  *
  * KEY DEPTH, NOT A LOCK: the probe key is baked into the `.wasm` at build time.
  * A determined attacker can extract it from the shipped artifact — this is
- * defense in depth, not a decisive control (PRD). The one-time nonce remains the
+ * defense in depth, not a decisive control (architecture). The one-time nonce remains the
  * primary anti-replay guarantee.
  *
  * VENDORED ARTIFACT: `../wasm/fp_wasm_bg.wasm` is a DEV build keyed with the test

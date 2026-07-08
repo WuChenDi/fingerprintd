@@ -51,7 +51,7 @@ export interface CandidateSource {
 
   /**
    * Fold an observation into the library per the scorer's `outcome`, mirroring
-   * `fp_core::fuzzy::FuzzyStore::identify`'s persistence (design §7):
+   * `fp_core::fuzzy::FuzzyStore::identify`'s persistence (fuzzy-matching §7):
    *   - `match`      — drift the matched template toward `components` and index
    *                    the observed `blockingKeys` under its id.
    *   - `new_device` — store the freshly minted template and index its keys.

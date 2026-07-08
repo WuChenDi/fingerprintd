@@ -38,7 +38,7 @@ export interface Collect {
   challenge: ChallengeProbe
 }
 
-/** `GET /challenge` response body (PRD §5). */
+/** `GET /challenge` response body (architecture §5). */
 export interface ChallengeResponse {
   /** The one-time nonce the client must echo on `identify`. */
   nonce: string
@@ -71,7 +71,7 @@ export interface IdentifyRequest {
   stable_components: Record<string, unknown>
 }
 
-/** Passive network-signal risk summary (PRD §5). */
+/** Passive network-signal risk summary (architecture §5). */
 export interface Signals {
   /** Whether the UA and edge-observed TLS fingerprint agree. */
   ua_tls_consistent: boolean
@@ -93,7 +93,7 @@ export interface PassiveVerdict {
   confidence_adjustment: number
 }
 
-/** `POST /identify` success body (PRD §5). */
+/** `POST /identify` success body (architecture §5). */
 export interface IdentifyResponse {
   /** Stable device identifier (server-computed; serde-renamed from visitor_id). */
   visitorId: string

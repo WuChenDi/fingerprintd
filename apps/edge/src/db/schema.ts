@@ -7,16 +7,16 @@ import {
 } from 'drizzle-orm/sqlite-core'
 
 // Edge D1 state schema — the externalized half of `fp_core`'s in-memory store
-// (docs/design-fuzzy-matching.md §3/§4/§9/§11). Mirrors the native
+// (docs/fuzzy-matching.md §3/§4/§9/§11). Mirrors the native
 // `FingerprintRecord` + `BlockingIndex`. The one-time nonce is the exception:
 // it needs atomic check-and-burn (D1's eventual replication cannot give it), so
 // it lives in a Durable Object, not here.
 
 /**
- * Fingerprint library: `visitorId -> template` (design §3/§11). `components`
+ * Fingerprint library: `visitorId -> template` (fuzzy-matching §3/§11). `components`
  * holds the RAW component object the host recalls and hands to the WASM scorer,
  * which re-salts it deterministically (the salt secret is a Worker Secret, not
- * stored). Drift (design §7) upserts this row on a confirmed match; a
+ * stored). Drift (fuzzy-matching §7) upserts this row on a confirmed match; a
  * review-band hit never touches it (anti-poisoning).
  */
 export const templates = sqliteTable('templates', {
@@ -28,7 +28,7 @@ export const templates = sqliteTable('templates', {
 })
 
 /**
- * The `key -> set<visitorId>` blocking inverted index (design §4). Stage-one
+ * The `key -> set<visitorId>` blocking inverted index (fuzzy-matching §4). Stage-one
  * recall unions the visitors sharing any of a probe's blocking keys. The
  * composite primary key makes re-indexing a known `(key, visitor)` idempotent;
  * `idx_blocking_index_key` serves the `WHERE key IN (...)` recall.
@@ -46,7 +46,7 @@ export const blockingIndex = sqliteTable(
 )
 
 /**
- * Per-value frequency material for the `u_i` rarity estimate (design §9), keyed
+ * Per-value frequency material for the `u_i` rarity estimate (fuzzy-matching §9), keyed
  * by salted value hash so no plaintext component value is stored. Provisioned
  * here; unpopulated on the edge (the WASM `score` approximates `u_i` over the
  * recalled block — the PCF5 parity refinement).

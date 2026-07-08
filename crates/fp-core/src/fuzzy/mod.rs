@@ -1,13 +1,13 @@
 //! In-memory storage layer for the weighted fuzzy-matching engine
-//! (docs/design-fuzzy-matching.md §3/§4/§9/§11).
+//! (docs/fuzzy-matching.md §3/§4/§9/§11).
 //!
 //! This is the storage substrate only — it holds the data model, the blocking
 //! indexes for candidate generation, and the frequency material for parameter
 //! estimation. It is deliberately **additive**: the P0 `/identify` exact-match
-//! path is untouched, and the two-stage scoring/judgment (design §5) is out of
+//! path is untouched, and the two-stage scoring/judgment (fuzzy-matching §5) is out of
 //! scope here.
 //!
-//! Pieces, mapped to the design's data-structure table (§11):
+//! Pieces, mapped to the fuzzy-matching spec's data-structure table (§11):
 //! - [`component`] — salted, compliance-preserving stored representations (§3)
 //!   and the cold-start stability priors (§2/§9).
 //! - [`frequency`] — `value hash → count`, the material for `u_i` (§9).
@@ -61,7 +61,7 @@ use self::{
 ///
 /// The bounds are enforced by the concrete backends ([`RecordStore`],
 /// [`FrequencyTable`], [`BlockingIndex`]) and every eviction/drop is counted
-/// (never silent), matching the blocking `dropped()` precedent (design §4).
+/// (never silent), matching the blocking `dropped()` precedent (fuzzy-matching §4).
 /// Applies to a stateful native store built by [`FuzzyStore::new_with_policy`];
 /// the stateless edge store ([`FuzzyStore::deterministic`]) is per-request and
 /// needs no eviction, so it stays unbounded.
@@ -77,7 +77,7 @@ pub struct EvictionPolicy {
     /// unbounded. A new value beyond the cap is dropped (already-tracked values
     /// keep counting).
     pub max_frequency_values: Option<usize>,
-    /// Per-block visitor cap for the blocking index (design §4).
+    /// Per-block visitor cap for the blocking index (fuzzy-matching §4).
     pub max_block: usize,
 }
 
@@ -278,13 +278,13 @@ impl FuzzyStore {
     }
 
     /// Stage-one candidate recall: the union of visitors sharing any blocking
-    /// key with `components` (design §4).
+    /// key with `components` (fuzzy-matching §4).
     pub fn candidates(&self, components: &Value) -> HashSet<String> {
         let stored = self.stored_map(components);
         self.blocking.candidates(&self.blocking_keys(&stored))
     }
 
-    /// The blocking keys for `components`, hex-encoded (design §4).
+    /// The blocking keys for `components`, hex-encoded (fuzzy-matching §4).
     ///
     /// The hex form of each [`blocking::BlockingKey`] a stateless host queries
     /// its externalized candidate index with. Key derivation depends on the salt
@@ -299,7 +299,7 @@ impl FuzzyStore {
     }
 
     /// Convert a raw JSON component object into its stored-form map, dropping
-    /// missing or type-mismatched entries (design §8). Shared by [`observe`],
+    /// missing or type-mismatched entries (fuzzy-matching §8). Shared by [`observe`],
     /// [`candidates`], and the stage-two scorer.
     ///
     /// [`observe`]: FuzzyStore::observe
@@ -331,7 +331,7 @@ impl FuzzyStore {
 
     /// Convert one raw component value to its stored form per the schema.
     ///
-    /// Returns `None` for a missing or type-mismatched value (design §8: a
+    /// Returns `None` for a missing or type-mismatched value (fuzzy-matching §8: a
     /// missing component is simply not compared).
     fn to_stored(&self, name: &str, value: &Value) -> Option<Stored> {
         match classify(name).kind {
@@ -344,14 +344,14 @@ impl FuzzyStore {
     }
 
     /// Derive the blocking keys (K1, K2, and the `MinHash` bands) for a stored
-    /// component map (design §4). A composite key is emitted only when all of
+    /// component map (fuzzy-matching §4). A composite key is emitted only when all of
     /// its members are present, so recall relies on the union of independent keys.
     fn blocking_keys(&self, stored: &BTreeMap<String, Stored>) -> Vec<BlockingKey> {
         let mut keys = Vec::new();
         // K0 — catch-all over every present scalar value, so two probes whose
         // scalar components are byte-identical always recall each other (the
         // exact-match subset). Fragile by design; recall of *drifted* probes
-        // relies on the independent K1/K2/font keys below (design §4 redundancy).
+        // relies on the independent K1/K2/font keys below (fuzzy-matching §4 redundancy).
         if let Some(key) = all_scalar_key(stored) {
             keys.push(key);
         }
@@ -389,7 +389,7 @@ pub struct FieldSpec {
     pub kind: Kind,
 }
 
-/// Classify a component name into its schema entry (design §2 component table).
+/// Classify a component name into its schema entry (fuzzy-matching §2 component table).
 ///
 /// Unknown names default to a medium-stability category value.
 pub fn classify(name: &str) -> FieldSpec {

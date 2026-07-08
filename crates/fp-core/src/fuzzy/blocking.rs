@@ -1,10 +1,10 @@
 //! Stage-one candidate generation: a `key → set<visitorId>` inverted index
-//! (design §4/§11).
+//! (fuzzy-matching §4/§11).
 //!
 //! Recall is prioritized over precision: several independent blocking keys are
 //! queried and their hits unioned, so a single changed component does not drop
 //! the true match. Popular configurations (e.g. stock iPhone Safari) inflate a
-//! block; over-capacity blocks carry little information and — per the PRD's
+//! block; over-capacity blocks carry little information and — per the architecture's
 //! no-silent-truncation rule — dropped members are logged, never hidden.
 
 use std::{
@@ -15,15 +15,15 @@ use std::{
     },
 };
 
-/// A blocking key: a 256-bit digest of a stable-component subset (design §4).
+/// A blocking key: a 256-bit digest of a stable-component subset (fuzzy-matching §4).
 pub type BlockingKey = [u8; 32];
 
 /// Default per-block size cap. Blocks larger than this are low-information and
-/// left to stage-two scoring to disambiguate (design §4).
+/// left to stage-two scoring to disambiguate (fuzzy-matching §4).
 pub const DEFAULT_MAX_BLOCK: usize = 1024;
 
 /// Storage contract for stage-one candidate recall: the `key → set<visitorId>`
-/// inverted index (design §4/§11).
+/// inverted index (fuzzy-matching §4/§11).
 ///
 /// The in-memory [`BlockingIndex`] is the single-instance implementation. An
 /// externalized backend (a Cloudflare D1 table of `(key, visitorId)` rows, a
@@ -103,7 +103,7 @@ impl BlockingIndex {
         block.insert(visitor.to_string());
     }
 
-    /// Union of visitors across every supplied `key` — the candidate set (design §4).
+    /// Union of visitors across every supplied `key` — the candidate set (fuzzy-matching §4).
     pub fn candidates(&self, keys: &[BlockingKey]) -> HashSet<String> {
         let index = self.lock();
         let mut candidates = HashSet::new();

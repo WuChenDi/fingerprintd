@@ -65,13 +65,13 @@ pub struct Config {
     /// Whether to trust edge-injected passive-signal headers (`CF-Connecting-IP`,
     /// `cf-bot-management-ja4`). Enable **only** when the service sits behind a
     /// trusted edge (Cloudflare) that injects these headers and an origin IP
-    /// allowlist rejects direct client connections (PRD §4.2). Left `false` by
+    /// allowlist rejects direct client connections (architecture §4.2). Left `false` by
     /// default (fail-closed): a directly-reachable origin must not trust
     /// client-supplied copies of these headers, or a client could self-inject a
     /// browser-looking JA4 to forge consistency. Overridable via
     /// `FINGERPRINTD_TRUST_EDGE_HEADERS`.
     pub trust_edge_headers: bool,
-    /// Optional pre-shared HMAC key for nonce-probe verification (T8, PRD §4.1
+    /// Optional pre-shared HMAC key for nonce-probe verification (T8, architecture §4.1
     /// pt 3). When set (and non-empty), `GET /challenge` advertises the probe
     /// transform and `POST /identify` requires a correct `probe` field, rejecting
     /// a missing or forged one with `401`. Left unset by default: the probe is
@@ -80,7 +80,7 @@ pub struct Config {
     /// legitimate traffic. Overridable via `FINGERPRINTD_PROBE_KEY`.
     #[serde(default)]
     pub probe_key: Option<SecretKey>,
-    /// Optional pre-shared HMAC key for signing `/identify` responses (T9, PRD
+    /// Optional pre-shared HMAC key for signing `/identify` responses (T9, architecture
     /// §4.1). When set (and non-empty), each success carries `x-fp-timestamp`
     /// and `x-fp-signature` headers so a consumer can detect a tampered or forged
     /// response (`crate::signing`). Left unset by default (fail-open on an absent
@@ -88,7 +88,7 @@ pub struct Config {
     /// unaffected. Overridable via `FINGERPRINTD_RESPONSE_SIGNING_KEY`.
     #[serde(default)]
     pub response_signing_key: Option<SecretKey>,
-    /// Whether to enforce the request timestamp window on `/identify` (T9, PRD
+    /// Whether to enforce the request timestamp window on `/identify` (T9, architecture
     /// §4.1). When `true`, a request whose `ts` (Unix milliseconds) is absent or
     /// more than `ts_skew_secs` from server time is rejected with `401`, bounding
     /// how long a captured payload stays replayable on top of the one-time nonce.
@@ -110,7 +110,7 @@ pub struct Config {
     /// disables TTL eviction (the default). Overridable via
     /// `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`.
     pub fuzzy_record_ttl_secs: u64,
-    /// Per-block visitor cap for the blocking index (design §4). A block over
+    /// Per-block visitor cap for the blocking index (fuzzy-matching §4). A block over
     /// this size drops (and counts) further insertions. Overridable via
     /// `FINGERPRINTD_FUZZY_MAX_BLOCK`.
     pub fuzzy_max_block: usize,
@@ -120,7 +120,7 @@ pub struct Config {
     /// `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES`.
     pub fuzzy_max_frequency_values: usize,
     /// Optional pre-shared admin credential gating the GDPR erasure endpoint
-    /// `DELETE /visitor/{id}` (finding M6, PRD §7 RTBF). When set (and non-empty),
+    /// `DELETE /visitor/{id}` (finding M6, architecture §7 RTBF). When set (and non-empty),
     /// the endpoint accepts an `Authorization: Bearer <admin_key>` request and
     /// erases the visitor. Left unset by default and **fail-closed**: with no key
     /// the endpoint is disabled entirely (`404`), and a configured key rejects a
@@ -130,7 +130,7 @@ pub struct Config {
     pub admin_key: Option<SecretKey>,
     /// Compliance retention window, in seconds: the maximum age (by `last_seen`) a
     /// visitor record is retained before a proactive background sweep purges it
-    /// (finding M6, PRD §7). `0` disables the sweep (the default), leaving
+    /// (finding M6, architecture §7). `0` disables the sweep (the default), leaving
     /// behaviour unchanged. Distinct from and additive to the lazy
     /// `fuzzy_record_ttl_secs` eviction: this runs on a timer even without
     /// identify traffic. Overridable via `FINGERPRINTD_RETENTION_SECS`.

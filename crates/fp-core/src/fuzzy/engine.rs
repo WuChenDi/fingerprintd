@@ -1,7 +1,7 @@
-//! Stage-two probabilistic scoring, decision, and drift (design §5/§6/§7/§8).
+//! Stage-two probabilistic scoring, decision, and drift (fuzzy-matching §5/§6/§7/§8).
 //!
 //! Given a probe, [`FuzzyStore::identify`] performs the full two-stage match:
-//! stage one recalls candidates from the blocking indexes (design §4, in
+//! stage one recalls candidates from the blocking indexes (fuzzy-matching §4, in
 //! [`super`]), stage two scores each candidate with the Fellegi–Sunter model
 //! (§5) and applies the double-threshold decision (§5.4), drift update (§7), and
 //! confidence fusion (§6).
@@ -13,7 +13,7 @@
 //!   the frequency table (§9). Rare values that agree are strong evidence;
 //!   common ones (Chrome-on-Windows) carry almost none.
 //!
-//! Thresholds and priors here are **cold-start defaults**; the design's offline
+//! Thresholds and priors here are **cold-start defaults**; the fuzzy-matching spec's offline
 //! evaluation (§10) tunes them against a labelled set. They are deliberately
 //! separated so the eval harness (T5) can grid-search without touching scoring.
 
@@ -27,16 +27,16 @@ use super::{
 };
 
 /// Score at or above which the best candidate is accepted as the same device
-/// (design §5.4 `T_hi`). Units are bits of summed log-likelihood ratio.
+/// (fuzzy-matching §5.4 `T_hi`). Units are bits of summed log-likelihood ratio.
 const T_HI: f64 = 12.0;
 /// Score below which the best candidate is rejected as a different device; the
-/// `[T_LO, T_HI)` band is the "suspected" review zone (design §5.4 `T_lo`).
+/// `[T_LO, T_HI)` band is the "suspected" review zone (fuzzy-matching §5.4 `T_lo`).
 const T_LO: f64 = 8.0;
 /// Jaccard threshold above which a set component counts as a full agreement
-/// (design §5.1 `τ`); below it the score interpolates by Jaccard (§5.3).
+/// (fuzzy-matching §5.1 `τ`); below it the score interpolates by Jaccard (§5.3).
 const TAU: f64 = 0.5;
 /// Two candidates both `≥ T_hi` within this many bits are flagged as a
-/// collision risk (design §5.4).
+/// collision risk (fuzzy-matching §5.4).
 const COLLISION_GAP: f64 = 2.0;
 /// Prior `u_i` for set components (fonts/plugins). The frequency table holds no
 /// per-set material, so set rarity uses this distinctive-by-default constant.
@@ -44,20 +44,20 @@ const SET_U: f64 = 0.05;
 /// Lower/upper clamps keeping `u_i` in `(0, 1)` so the log-ratios stay finite.
 const U_FLOOR: f64 = 1e-4;
 const U_CEIL: f64 = 0.9999;
-/// Score scale (bits) over which confidence margins saturate (design §6).
+/// Score scale (bits) over which confidence margins saturate (fuzzy-matching §6).
 const CONF_SCALE: f64 = 4.0;
 /// Component count of a full rich fingerprint. Confidence scales the number of
 /// components that actually took part in scoring against this, so a sparse probe
-/// (many missing) is less certain (design §6/§8).
+/// (many missing) is less certain (fuzzy-matching §6/§8).
 const FULL_COMPONENTS: f64 = 8.0;
 
-/// The double-threshold verdict for a probe (design §5.4).
+/// The double-threshold verdict for a probe (fuzzy-matching §5.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
     /// Best candidate scored `≥ T_hi` — accepted as the same device.
     Match,
     /// Best candidate scored in `[T_lo, T_hi)` — suspected; returned but the
-    /// template is **not** updated (anti-poisoning, design §7).
+    /// template is **not** updated (anti-poisoning, fuzzy-matching §7).
     Review,
     /// No candidate cleared `T_lo` — a fresh `visitorId` is minted.
     NewDevice,
@@ -81,13 +81,13 @@ pub struct MatchOutcome {
     pub visitor_id: String,
     /// `true` only when a new `visitorId` was minted.
     pub is_new_device: bool,
-    /// Fused confidence in `[0, 1]` (design §6).
+    /// Fused confidence in `[0, 1]` (fuzzy-matching §6).
     pub confidence: f64,
-    /// The verdict that produced this outcome (design §5.4).
+    /// The verdict that produced this outcome (fuzzy-matching §5.4).
     pub decision: Decision,
     /// Best candidate's score in bits, if any candidate was scored.
     pub score: Option<f64>,
-    /// Number of components that actually participated in scoring (design §8).
+    /// Number of components that actually participated in scoring (fuzzy-matching §8).
     pub compared_components: usize,
     /// Whether a runner-up also cleared `T_hi` within [`COLLISION_GAP`].
     pub collision_risk: bool,
@@ -102,7 +102,7 @@ struct Scored {
 impl FuzzyStore {
     /// Identify `components`, folding the observation in per the verdict.
     ///
-    /// Two-stage (design §4/§5): recall candidates, score each with
+    /// Two-stage (fuzzy-matching §4/§5): recall candidates, score each with
     /// Fellegi–Sunter, then apply the double-threshold decision (§5.4). A match
     /// drifts the winning template (§7); a review returns the suspected visitor
     /// without updating it (anti-poisoning, §7); a new device is minted and
@@ -129,7 +129,7 @@ impl FuzzyStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let outcome = self.evaluate(components);
-        // Persist per the verdict (design §7): a confirmed match drifts the
+        // Persist per the verdict (fuzzy-matching §7): a confirmed match drifts the
         // winning template toward this observation and a new device is stored
         // under its freshly minted id; a review-band hit leaves the template
         // untouched (anti-poisoning).
@@ -142,7 +142,7 @@ impl FuzzyStore {
         outcome
     }
 
-    /// Score `components` and decide, **without mutating** the store (design §5).
+    /// Score `components` and decide, **without mutating** the store (fuzzy-matching §5).
     ///
     /// The pure half of [`identify`]: stage-one recall, Fellegi–Sunter scoring,
     /// and the double-threshold decision. It returns the same [`MatchOutcome`]
@@ -236,11 +236,11 @@ impl FuzzyStore {
         }
     }
 
-    /// Fellegi–Sunter score of a candidate template against the probe (design §5).
+    /// Fellegi–Sunter score of a candidate template against the probe (fuzzy-matching §5).
     ///
     /// Sums the per-component log-likelihood weight over components present on
     /// both sides; components missing on either side are skipped, contributing
-    /// zero (design §5.3/§8).
+    /// zero (fuzzy-matching §5.3/§8).
     fn score_candidate(&self, probe: &ProbeMap, template: &FingerprintRecord) -> Scored {
         let mut score = 0.0;
         let mut compared = 0;
@@ -259,7 +259,7 @@ impl FuzzyStore {
     }
 
     /// Compare one component, returning its agreement fraction `sim ∈ [0, 1]`
-    /// and its rarity `u_i` (design §5.1/§5.3). `None` if the two stored forms
+    /// and its rarity `u_i` (fuzzy-matching §5.1/§5.3). `None` if the two stored forms
     /// are of different kinds and cannot be compared.
     fn compare(&self, probe: &Stored, template: &Stored) -> Option<(f64, f64)> {
         match (probe, template) {
@@ -282,7 +282,7 @@ impl FuzzyStore {
     }
 
     /// Estimate `u_i` for a value hash: its smoothed relative frequency across
-    /// the library (design §9), clamped to keep the log-ratios finite.
+    /// the library (fuzzy-matching §9), clamped to keep the log-ratios finite.
     ///
     /// Add-`0.5` (Jeffreys) smoothing keeps a never-before-seen value from
     /// collapsing `u` to zero on a small library.
@@ -298,7 +298,7 @@ impl FuzzyStore {
 /// `BTreeMap` spelling everywhere.
 type ProbeMap = std::collections::BTreeMap<String, Stored>;
 
-/// Per-component Fellegi–Sunter weight in bits (design §5.3).
+/// Per-component Fellegi–Sunter weight in bits (fuzzy-matching §5.3).
 ///
 /// `sim` blends the agree and disagree log-ratios: `1.0` is a full agreement
 /// (`log2(m/u)`), `0.0` a full disagreement (`log2((1-m)/(1-u))`), and a set's
@@ -310,12 +310,12 @@ fn agreement_weight(m: f64, u: f64, sim: f64) -> f64 {
 }
 
 /// Fuse the confidence in `[0, 1]` from the decision, score margins, and probe
-/// completeness (design §6).
+/// completeness (fuzzy-matching §6).
 ///
 /// Three factors combine: how far the best score sits past its decision
 /// boundary, its separation from the runner-up, and the fraction of the probe's
 /// components that took part in scoring (a sparse probe is less certain, §8).
-/// The passive JA4/UA consistency input (design §6) is a P2 signal, left
+/// The passive JA4/UA consistency input (fuzzy-matching §6) is a P2 signal, left
 /// neutral here.
 ///
 /// This is **decision confidence, not identity trust** (finding M3). A first-ever
@@ -393,7 +393,7 @@ mod tests {
     }
 
     /// (a) De-avalanche: a single browser upgrade plus one changed font must not
-    /// mint a new device — the stable components carry the match (design §5/§8).
+    /// mint a new device — the stable components carry the match (fuzzy-matching §5/§8).
     #[test]
     fn a_single_component_drift_stays_the_same_device() {
         let store = FuzzyStore::new();
@@ -448,7 +448,7 @@ mod tests {
 
     /// (c) Low-entropy fade: agreeing only on components that are common across
     /// the library (timezone/platform/languages, high `u_i`) carries almost no
-    /// evidence, so a bare low-entropy overlap does not merge (design §5.3).
+    /// evidence, so a bare low-entropy overlap does not merge (fuzzy-matching §5.3).
     #[test]
     fn c_low_entropy_only_overlap_does_not_merge() {
         let store = FuzzyStore::new();
@@ -473,7 +473,7 @@ mod tests {
 
     /// (d) Missing components: a null canvas (privacy browser) is never a
     /// matchable value, so two distinct privacy devices do not collide on it; and
-    /// a match built from fewer components is less confident (design §6/§8).
+    /// a match built from fewer components is less confident (fuzzy-matching §6/§8).
     #[test]
     fn d_missing_components_neither_collide_nor_inflate_confidence() {
         // A null canvas must not link two otherwise-distinct privacy devices.
@@ -513,7 +513,7 @@ mod tests {
     }
 
     /// (d, anti-poisoning) Drift updates the template ONLY on a `≥ T_hi` match
-    /// (design §7). An ambiguous `[T_lo, T_hi)` review-band hit must NOT mutate
+    /// (fuzzy-matching §7). An ambiguous `[T_lo, T_hi)` review-band hit must NOT mutate
     /// the stored template, so an attacker cannot walk one device's fingerprint
     /// toward another through a run of low-confidence near-misses.
     #[test]

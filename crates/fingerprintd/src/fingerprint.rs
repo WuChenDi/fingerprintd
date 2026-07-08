@@ -28,7 +28,7 @@ pub struct Identification {
 /// In-memory exact-match fingerprint store.
 ///
 /// Keyed by the derived `visitorId`; the value tracks how many times the
-/// fingerprint has been observed. First-/last-seen timestamps from the PRD data
+/// fingerprint has been observed. First-/last-seen timestamps from the architecture data
 /// model are deferred (not required for the P0 exact-match acceptance).
 #[derive(Debug, Default)]
 pub struct FingerprintStore {

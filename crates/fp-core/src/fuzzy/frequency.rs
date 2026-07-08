@@ -1,4 +1,4 @@
-//! Per-value frequency counts — the material for estimating `u_i` (design §9/§11).
+//! Per-value frequency counts — the material for estimating `u_i` (fuzzy-matching §9/§11).
 //!
 //! `u_i = P(agree | different device)` is the rarity of a value: common values
 //! (Chrome-on-Windows) carry little evidence when they agree, rare values carry
@@ -15,7 +15,7 @@ use std::{
 use super::component::Hash32;
 
 /// Storage contract for the per-value frequency material behind `u_i` estimation
-/// (design §9/§11).
+/// (fuzzy-matching §9/§11).
 ///
 /// The in-memory [`FrequencyTable`] is the single-instance implementation. An
 /// externalized backend (a shared counter store, a later step) lives behind the
@@ -33,7 +33,7 @@ pub trait FrequencyStore: Send + Sync {
     fn total(&self) -> u64;
 }
 
-/// `value hash → count`, with a running total, for `u_i` estimation (design §9).
+/// `value hash → count`, with a running total, for `u_i` estimation (fuzzy-matching §9).
 ///
 /// Updated incrementally as fingerprints are observed. The counter maps a
 /// salted value hash to its number of sightings; `total` is the number of

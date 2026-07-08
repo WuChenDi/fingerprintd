@@ -1,7 +1,7 @@
 //! Compliance-preserving stored representations of fingerprint components
-//! (design §3) and the cold-start stability priors (design §2/§9).
+//! (fuzzy-matching §3) and the cold-start stability priors (fuzzy-matching §2/§9).
 //!
-//! Per PRD §7 data minimization, raw values are never retained: category and
+//! Per architecture §7 data minimization, raw values are never retained: category and
 //! set values are salted-hashed before storage while still supporting equality
 //! comparison, frequency counting, and set similarity.
 
@@ -18,7 +18,7 @@ pub type Hash32 = [u8; 32];
 ///
 /// A random salt makes stored hashes non-reversible via precomputed tables
 /// while still permitting equality comparison and frequency counting within one
-/// instance (design §3). It is fixed for the store's lifetime, so a given value
+/// instance (fuzzy-matching §3). It is fixed for the store's lifetime, so a given value
 /// hashes identically across observations.
 #[derive(Clone)]
 pub struct Salt([u8; 16]);
@@ -59,7 +59,7 @@ impl Salt {
     /// Salted per-element hashes of a set component.
     ///
     /// Hashing each element independently preserves the set structure — and
-    /// therefore `Jaccard` similarity — while storing no raw element (design §3).
+    /// therefore `Jaccard` similarity — while storing no raw element (fuzzy-matching §3).
     pub fn hash_set<I, S>(&self, elements: I) -> BTreeSet<Hash32>
     where
         I: IntoIterator<Item = S>,
@@ -79,7 +79,7 @@ impl std::fmt::Debug for Salt {
     }
 }
 
-/// The stored form of one fingerprint component (design §3).
+/// The stored form of one fingerprint component (fuzzy-matching §3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stored {
     /// A category value, kept as its salted hash for equality + frequency use.
@@ -106,7 +106,7 @@ pub fn jaccard(a: &BTreeSet<Hash32>, b: &BTreeSet<Hash32>) -> f64 {
 }
 
 /// Stability tier of a component — the source of its cold-start `m_i` prior
-/// (design §2/§9). `m_i` is `P(agree | same device)`.
+/// (fuzzy-matching §2/§9). `m_i` is `P(agree | same device)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stability {
     /// Rarely changes for the same device (`WebGL`, audio, timezone, `CPU`).
@@ -118,7 +118,7 @@ pub enum Stability {
 }
 
 impl Stability {
-    /// Cold-start prior for `m_i` (design §9): high `0.95`, medium `0.80`,
+    /// Cold-start prior for `m_i` (fuzzy-matching §9): high `0.95`, medium `0.80`,
     /// low `0.50`. Refined post-launch via `EM` over high-confidence revisits.
     pub fn m_prior(self) -> f64 {
         match self {

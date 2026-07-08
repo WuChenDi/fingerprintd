@@ -1,4 +1,4 @@
-//! `MinHash`-`LSH` band keys for set components (design §4 K3 / §11).
+//! `MinHash`-`LSH` band keys for set components (fuzzy-matching §4 K3 / §11).
 //!
 //! Exact hashing of a font set breaks the moment one font is added, so a set is
 //! reduced to a `MinHash` signature and split into bands. Two sets that share

@@ -1,5 +1,5 @@
 /**
- * The edge Hono app (PRD §5), state-free and dependency-injected so it is
+ * The edge Hono app (architecture §5), state-free and dependency-injected so it is
  * unit-testable without the Workers runtime.
  *
  * It serves the same three routes as the native server
@@ -61,7 +61,7 @@ const CF_CONNECTING_IP = 'cf-connecting-ip'
 const CLAIMED_UA_KEYS = ['userAgent', 'user_agent', 'ua']
 
 /**
- * `POST /identify` request body (PRD §5). `stable_components` is an arbitrary
+ * `POST /identify` request body (architecture §5). `stable_components` is an arbitrary
  * component object (nested keys unrestricted); `probe`/`ts` are optional depth
  * checks. The schema is `.strict()` — any UNKNOWN top-level key (e.g. a stray
  * `challenge_response`) is REJECTED with a `400`, mirroring the native
@@ -230,7 +230,7 @@ function inWindow(clientTs: number, now: number, skewMs: number): boolean {
 /**
  * Compute the passive-signal verdict for a request via the shared WASM compute.
  *
- * The trust boundary (PRD §4.2): edge-injected JA4/IP are read ONLY behind a
+ * The trust boundary (architecture §4.2): edge-injected JA4/IP are read ONLY behind a
  * trusted edge. When `trustEdgeHeaders` is off we pass `undefined` for all three
  * inputs — an untrusted origin ignores any client-supplied copy — so the WASM
  * returns the degraded neutral verdict (`ua_tls_consistent: true`, `ip_risk:
@@ -268,7 +268,7 @@ function claimedUa(components: Record<string, unknown>): string | undefined {
   return undefined
 }
 
-/** Clamp a fused confidence into `[0, 1]` (design §6). */
+/** Clamp a fused confidence into `[0, 1]` (fuzzy-matching §6). */
 function clamp(value: number): number {
   return Math.min(1, Math.max(0, value))
 }
