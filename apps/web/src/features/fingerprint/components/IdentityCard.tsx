@@ -1,4 +1,4 @@
-import type { IdentifyResponse } from '@fingerprintd/client'
+import type { IdentifyResponse } from '@cdlab/fingerprintd-client'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '@/shared/components/ui/badge'
 import {

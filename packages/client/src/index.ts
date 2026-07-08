@@ -1,5 +1,5 @@
 /**
- * `@fingerprintd/client` — browser SDK for the fingerprintd challenge/identify
+ * `@cdlab/fingerprintd-client` — browser SDK for the fingerprintd challenge/identify
  * flow.
  *
  * The client only COLLECTS evidence; the SERVER judges. It sends RAW stable

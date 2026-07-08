@@ -39,7 +39,7 @@ export default defineConfig(async () => {
     ],
     test: {
       // Explicit, slash-free project name: the default (package.json
-      // `@fingerprintd/edge`) leaks a `/` into the Durable Object storage path
+      // `@cdlab/fingerprintd-edge`) leaks a `/` into the Durable Object storage path
       // and workerd rejects it.
       name: 'workers',
       include: ['tests/**/*.workers.test.ts'],

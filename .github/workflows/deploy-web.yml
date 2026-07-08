@@ -70,10 +70,10 @@ jobs:
         run: wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/packages/client/wasm" crates/fp-wasm
 
       # The SPA consumes the built SDK — its dist/ is gitignored, so build it
-      # (bundling the freshly-keyed WASM) before the app so `@fingerprintd/client`
+      # (bundling the freshly-keyed WASM) before the app so `@cdlab/fingerprintd-client`
       # resolves.
-      - name: Build SDK (@fingerprintd/client)
-        run: bun run --filter @fingerprintd/client build
+      - name: Build SDK (@cdlab/fingerprintd-client)
+        run: bun run --filter @cdlab/fingerprintd-client build
 
       - name: Build web
         working-directory: apps/web

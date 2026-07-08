@@ -1,10 +1,26 @@
 {
-  "name": "@fingerprintd/client",
+  "name": "@cdlab/fingerprintd-client",
   "version": "0.0.0",
   "description": "Browser SDK for the fingerprintd challenge/identify flow (collect-only; the server judges).",
   "type": "module",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
+  "keywords": [
+    "fingerprinting",
+    "device-fingerprint",
+    "browser-sdk",
+    "anti-fraud",
+    "fingerprintjs"
+  ],
+  "homepage": "https://github.com/WuChenDi/fingerprintd/tree/main/packages/client#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WuChenDi/fingerprintd.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/WuChenDi/fingerprintd/issues"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

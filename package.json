@@ -4,7 +4,22 @@
   "description": "Server-side device fingerprinting: Rust cargo workspace (server + fp-core + fp-wasm) plus a Bun workspace for the TS packages.",
   "type": "module",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
+  "keywords": [
+    "fingerprinting",
+    "anti-fraud",
+    "device-fingerprint",
+    "bot-detection",
+    "security"
+  ],
+  "homepage": "https://github.com/WuChenDi/fingerprintd#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WuChenDi/fingerprintd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/WuChenDi/fingerprintd/issues"
+  },
   "workspaces": {
     "packages": [
       "packages/*",

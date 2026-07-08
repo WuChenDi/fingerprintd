@@ -99,8 +99,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       # apps/web consumes the built SDK — build it first (dist is gitignored).
-      - name: Build SDK (@fingerprintd/client)
-        run: bun run --filter @fingerprintd/client build
+      - name: Build SDK (@cdlab/fingerprintd-client)
+        run: bun run --filter @cdlab/fingerprintd-client build
 
       - name: Biome check
         working-directory: apps/web

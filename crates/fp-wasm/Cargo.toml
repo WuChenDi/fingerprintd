@@ -1,9 +1,15 @@
 [package]
-name         = "fp-wasm"
-version      = "0.1.0"
+name        = "fp-wasm"
+description = "WebAssembly build of the fingerprintd compute core (nonce probe, blocking keys, Fellegi-Sunter scoring, response signing) for the edge Worker and browser SDK."
+version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
+authors.workspace      = true
 license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+keywords    = ["fingerprinting", "wasm", "anti-fraud", "device-id"]
+categories  = ["wasm", "algorithms"]
 publish.workspace      = true
 
 [lib]
