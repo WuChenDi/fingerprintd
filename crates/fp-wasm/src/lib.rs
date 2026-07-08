@@ -40,6 +40,7 @@
 
 use fp_core::fuzzy::FuzzyStore;
 use fp_core::probe::ProbeVerifier;
+use fp_core::signals::{StaticIpIntel, compute};
 use fp_core::signing::ResponseSigner;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
@@ -83,6 +84,47 @@ fn probe_with_key(key: &[u8], nonce: &str) -> Option<String> {
 #[wasm_bindgen]
 pub fn probe(nonce: &str) -> String {
     probe_with_key(PROBE_KEY.as_bytes(), nonce).unwrap_or_default()
+}
+
+/// Passive-signals verdict for one request, computed exactly as the native
+/// server ([`fp_core::signals::compute`]) does — so the edge Worker reaches the
+/// SAME UA↔TLS / IP-risk verdict.
+///
+/// Needs no secrets (unlike [`FpEngine`]), so it is a free `#[wasm_bindgen]`
+/// function. Constructs the dependency-free [`StaticIpIntel`] classifier, cross-
+/// checks the trusted JA4 stack against the claimed UA, and returns JSON:
+/// `{"ua_tls_consistent": <bool>, "ip_risk": "<low|medium|high>",
+/// "confidence_adjustment": <f64>}`. A missing/unparseable JA4 auto-degrades
+/// (neutral); a missing/unparseable IP defaults to `"low"` (§4.2).
+///
+/// The owned `Option<String>` parameters are the wasm-bindgen boundary shape (JS
+/// strings arrive owned); the body only borrows them, hence the local allow.
+#[wasm_bindgen]
+#[allow(clippy::needless_pass_by_value)]
+pub fn passive_signals(
+    ja4: Option<String>,
+    client_ip: Option<String>,
+    claimed_ua: Option<String>,
+) -> String {
+    passive_signals_impl(ja4.as_deref(), client_ip.as_deref(), claimed_ua.as_deref())
+}
+
+/// Native-testable core of [`passive_signals`], returning the JSON `String`
+/// directly so tests need not touch wasm-bindgen. Mirrors the `score_impl`
+/// reply style.
+fn passive_signals_impl(
+    ja4: Option<&str>,
+    client_ip: Option<&str>,
+    claimed_ua: Option<&str>,
+) -> String {
+    let intel = StaticIpIntel::new();
+    let signals = compute(ja4, client_ip, claimed_ua, &intel);
+    let reply = json!({
+        "ua_tls_consistent": signals.tls_consistency.ua_tls_consistent(),
+        "ip_risk": signals.ip_risk.as_str(),
+        "confidence_adjustment": signals.confidence_adjustment(),
+    });
+    reply.to_string()
 }
 
 /// Server-side edge compute, configured with a deployment's secrets.
@@ -242,8 +284,16 @@ struct Candidate {
 
 #[cfg(test)]
 mod tests {
-    use super::{FpEngine, PROBE_KEY, probe, probe_with_key};
+    use super::{FpEngine, PROBE_KEY, passive_signals_impl, probe, probe_with_key};
     use serde_json::{Value, json};
+
+    /// A JA4 whose structural counts read as a real browser (15 ciphers, 16 ext)
+    /// — the same fixture shape fp-core's `signals` tests use.
+    const BROWSER_JA4: &str = "t13d1516h2_8daaf6152771_02713d6af862";
+    /// A JA4 whose structural counts read as a minimal automation stack (3/4).
+    const AUTOMATION_JA4: &str = "t13d0304h1_aaaaaaaaaaaa_bbbbbbbbbbbb";
+    /// A spoofed browser UA (headless automation self-reporting Chrome).
+    const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0";
 
     /// A full, high-signal probe (8 components across all three kinds).
     fn full_probe() -> Value {
@@ -397,5 +447,70 @@ mod tests {
         let engine = FpEngine::new("salt-secret", "pk", "sk");
         assert!(engine.score_impl("not json").is_err());
         assert!(engine.blocking_keys_impl("not json").is_err());
+    }
+
+    /// A browser JA4 over a Chrome UA agrees → consistent + positive boost.
+    #[test]
+    fn passive_signals_consistent_boosts() {
+        let reply: Value = serde_json::from_str(&passive_signals_impl(
+            Some(BROWSER_JA4),
+            Some("198.51.100.7"),
+            Some(CHROME_UA),
+        ))
+        .unwrap();
+        assert_eq!(reply["ua_tls_consistent"], true);
+        assert!(reply["confidence_adjustment"].as_f64().unwrap() > 0.0);
+    }
+
+    /// A Chrome UA over an automation TLS stack is the anti-forgery mismatch →
+    /// inconsistent + strong negative downgrade.
+    #[test]
+    fn passive_signals_mismatch_penalises() {
+        let reply: Value = serde_json::from_str(&passive_signals_impl(
+            Some(AUTOMATION_JA4),
+            Some("34.120.5.6"),
+            Some(CHROME_UA),
+        ))
+        .unwrap();
+        assert_eq!(reply["ua_tls_consistent"], false);
+        assert!(reply["confidence_adjustment"].as_f64().unwrap() < 0.0);
+    }
+
+    /// A missing JA4 auto-degrades: consistent-by-default, neutral adjustment.
+    #[test]
+    fn passive_signals_absent_ja4_degrades_neutral() {
+        let reply: Value =
+            serde_json::from_str(&passive_signals_impl(None, None, Some(CHROME_UA))).unwrap();
+        assert_eq!(reply["ua_tls_consistent"], true);
+        assert!(reply["confidence_adjustment"].as_f64().unwrap().abs() < f64::EPSILON);
+    }
+
+    /// The IP band mirrors fp-core: a datacenter IP is "high", a residential /
+    /// absent IP is "low".
+    #[test]
+    fn passive_signals_ip_risk_band() {
+        let datacenter: Value = serde_json::from_str(&passive_signals_impl(
+            Some(BROWSER_JA4),
+            Some("34.120.5.6"),
+            Some(CHROME_UA),
+        ))
+        .unwrap();
+        assert_eq!(datacenter["ip_risk"], "high");
+
+        let residential: Value = serde_json::from_str(&passive_signals_impl(
+            Some(BROWSER_JA4),
+            Some("198.51.100.7"),
+            Some(CHROME_UA),
+        ))
+        .unwrap();
+        assert_eq!(residential["ip_risk"], "low");
+
+        let absent: Value = serde_json::from_str(&passive_signals_impl(
+            Some(BROWSER_JA4),
+            None,
+            Some(CHROME_UA),
+        ))
+        .unwrap();
+        assert_eq!(absent["ip_risk"], "low");
     }
 }
