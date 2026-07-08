@@ -1,12 +1,14 @@
 name: Deploy web (Cloudflare)
 
 # Manual trigger only — deploying is explicit; CI (ci.yml) never auto-deploys.
-# Publishes the apps/web SPA as a static-assets Worker to the same Cloudflare
-# account as the edge Worker.
+# Publishes the apps/web SPA to Cloudflare Pages (direct upload) as the
+# `fingerprintd` project, on the same account as the edge Worker.
 #
 # Required repository secrets (Settings → Secrets and variables → Actions),
 # shared with deploy-edge.yml:
-#   CLOUDFLARE_API_TOKEN   deploy auth for wrangler (Workers Scripts:Edit)
+#   CLOUDFLARE_API_TOKEN   deploy auth for wrangler (needs Cloudflare Pages:Edit;
+#                          the edge Worker token's Workers Scripts:Edit is not
+#                          sufficient for Pages — grant Pages:Edit on the token)
 #   CLOUDFLARE_ACCOUNT_ID  deploy target account id
 # Optional (must equal the edge Worker's runtime key for the browser probe to
 # verify against `fingerprintd-edge`, else /identify returns 401 under probe

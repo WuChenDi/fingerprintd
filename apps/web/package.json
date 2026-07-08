@@ -27,8 +27,7 @@
     "preview": "vite preview",
     "lint": "biome check",
     "typecheck": "tsc --noEmit",
-    "deploy:dry": "wrangler deploy --dry-run",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler pages deploy --branch main"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
