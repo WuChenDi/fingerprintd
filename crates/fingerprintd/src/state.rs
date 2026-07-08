@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc};
 
 use crate::{
-    config::Config,
+    config::{Config, SecretKey},
     fuzzy::{EvictionPolicy, FuzzyStore},
     nonce::{InMemoryNonceStore, NonceStore},
     probe::ProbeVerifier,
@@ -38,6 +38,15 @@ pub struct AppState {
     /// Allowed clock skew, in milliseconds, for the request timestamp window when
     /// `enforce_ts_window` is on (T9). Derived from `config.ts_skew_secs`.
     pub ts_skew_ms: u64,
+    /// Admin credential gating the GDPR erasure endpoint (M6). `Some` only when a
+    /// non-empty `admin_key` is configured; then `DELETE /visitor/{id}` is enabled
+    /// and requires a matching `Authorization: Bearer` credential. `None` disables
+    /// the endpoint entirely (fail-closed `404`).
+    pub admin_key: Option<Arc<SecretKey>>,
+    /// Compliance retention window in milliseconds (M6): a record older than this
+    /// by `last_seen` is purged by the background sweep. `0` disables the sweep.
+    /// Derived from `config.retention_secs`.
+    pub retention_ms: u64,
 }
 
 impl AppState {
@@ -54,6 +63,13 @@ impl AppState {
             .as_ref()
             .filter(|key| key.is_configured())
             .map(|key| Arc::new(ResponseSigner::new(key.as_bytes())));
+        // Erasure is fail-closed: enabled only when a real (non-empty) admin key
+        // is provisioned, mirroring the probe/signer opt-in.
+        let admin_key = config
+            .admin_key
+            .as_ref()
+            .filter(|key| key.is_configured())
+            .map(|key| Arc::new(key.clone()));
         // Bound in-memory fuzzy growth (finding H2). A `0` TTL means "off"
         // (unbounded); the caps are generous fail-safe defaults so a small
         // workload is unaffected.
@@ -73,6 +89,8 @@ impl AppState {
             signer,
             enforce_ts_window: config.enforce_ts_window,
             ts_skew_ms: config.ts_skew_secs.saturating_mul(1000),
+            admin_key,
+            retention_ms: config.retention_secs.saturating_mul(1000),
         }
     }
 }
@@ -87,6 +105,8 @@ impl fmt::Debug for AppState {
             .field("signing_enabled", &self.signer.is_some())
             .field("enforce_ts_window", &self.enforce_ts_window)
             .field("ts_skew_ms", &self.ts_skew_ms)
+            .field("admin_key_enabled", &self.admin_key.is_some())
+            .field("retention_ms", &self.retention_ms)
             .finish_non_exhaustive()
     }
 }

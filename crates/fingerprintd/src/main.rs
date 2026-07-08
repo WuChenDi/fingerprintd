@@ -28,6 +28,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState::from_config(&config);
 
+    // Compliance retention (finding M6): when a window is configured, sweep the
+    // fingerprint library on a timer so records age out even without identify
+    // traffic. Disabled (default) leaves behaviour unchanged.
+    if state.retention_ms > 0 {
+        spawn_retention_sweep(state.clone(), config.retention_secs);
+    }
+
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!(local_addr = %listener.local_addr()?, "listening");
 
@@ -36,6 +43,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+/// Spawn the background compliance retention sweep (finding M6).
+///
+/// Every `retention_secs` (clamped to `[1s, 1h]` so a long window still reclaims
+/// promptly and a short one never busy-loops), purge records older than the
+/// configured window. Only called when `retention_secs > 0`; the task runs until
+/// the process shuts down.
+fn spawn_retention_sweep(state: AppState, retention_secs: u64) {
+    let period = std::time::Duration::from_secs(retention_secs.clamp(1, 3600));
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(period);
+        loop {
+            ticker.tick().await;
+            let purged = state.matcher.purge_expired(now_ms(), state.retention_ms);
+            if purged > 0 {
+                tracing::info!(purged, "retention sweep purged aged records");
+            }
+        }
+    });
+}
+
+/// Current Unix time in milliseconds, saturating to `0` before the epoch — the
+/// clock the retention sweep compares record `last_seen` against.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Initialize the tracing subscriber (pretty in dev; level via `RUST_LOG`).

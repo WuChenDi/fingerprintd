@@ -45,6 +45,19 @@ pub trait FingerprintStore: Send + Sync {
 
     /// Snapshot of `visitor`'s template, if present.
     fn get(&self, visitor: &str) -> Option<FingerprintRecord>;
+
+    /// Remove `visitor`'s record entirely (GDPR right-to-be-forgotten), returning
+    /// `true` when a record existed.
+    fn remove(&self, visitor: &str) -> bool;
+
+    /// Proactively remove every record older than `max_age_ms` (by `last_seen`)
+    /// relative to `now_ms`, returning the number removed (compliance retention).
+    ///
+    /// Defaults to a no-op for backends without a proactive sweep; the in-memory
+    /// [`RecordStore`] overrides it.
+    fn purge_older_than(&self, _now_ms: u64, _max_age_ms: u64) -> u64 {
+        0
+    }
 }
 
 /// In-memory `visitorId → record` fingerprint library (design §11).
@@ -172,6 +185,41 @@ impl RecordStore {
         self.evicted.load(Ordering::Relaxed)
     }
 
+    /// Remove `visitor`'s record entirely (GDPR right-to-be-forgotten), returning
+    /// `true` when a record existed.
+    ///
+    /// Idempotent: erasing an absent visitor is a no-op returning `false`. Does
+    /// not touch the aggregate frequency material (an aggregate with no
+    /// per-visitor linkage).
+    pub fn remove(&self, visitor: &str) -> bool {
+        self.lock().remove(visitor).is_some()
+    }
+
+    /// Proactively remove every record whose `last_seen` is older than
+    /// `max_age_ms` relative to `now_ms`, returning the number removed and
+    /// counting them as evictions (compliance retention).
+    ///
+    /// Unlike the lazy TTL sweep in [`RecordStore::observe`], this runs without
+    /// any observe traffic, so a record ages out on schedule even when the
+    /// visitor never returns.
+    pub fn purge_older_than(&self, now_ms: u64, max_age_ms: u64) -> u64 {
+        let mut records = self.lock();
+        let stale: Vec<String> = records
+            .iter()
+            .filter(|(_, r)| now_ms.saturating_sub(r.last_seen) > max_age_ms)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut purged = 0u64;
+        for id in stale {
+            records.remove(&id);
+            purged += 1;
+        }
+        if purged > 0 {
+            self.evicted.fetch_add(purged, Ordering::Relaxed);
+        }
+        purged
+    }
+
     /// Snapshot of `visitor`'s record, if present.
     pub fn get(&self, visitor: &str) -> Option<FingerprintRecord> {
         self.lock().get(visitor).cloned()
@@ -200,6 +248,14 @@ impl FingerprintStore for RecordStore {
 
     fn get(&self, visitor: &str) -> Option<FingerprintRecord> {
         RecordStore::get(self, visitor)
+    }
+
+    fn remove(&self, visitor: &str) -> bool {
+        RecordStore::remove(self, visitor)
+    }
+
+    fn purge_older_than(&self, now_ms: u64, max_age_ms: u64) -> u64 {
+        RecordStore::purge_older_than(self, now_ms, max_age_ms)
     }
 }
 
@@ -294,6 +350,38 @@ mod tests {
         assert!(store.get("v1").is_none());
         assert!(store.get("v2").is_some());
         assert_eq!(store.evicted(), 1);
+    }
+
+    #[test]
+    fn remove_erases_record_and_reports_prior_existence() {
+        let salt = Salt::random();
+        let store = RecordStore::new();
+        store.observe("v1", category(&salt, "ua", "x"), 1_000);
+
+        // Erasing a present visitor drops it and reports it existed.
+        assert!(store.remove("v1"));
+        assert!(store.get("v1").is_none());
+        // Erasing an absent visitor is an idempotent no-op.
+        assert!(!store.remove("v1"));
+    }
+
+    #[test]
+    fn purge_older_than_drops_only_aged_records_and_counts() {
+        let salt = Salt::random();
+        let store = RecordStore::new();
+        store.observe("old", category(&salt, "ua", "x"), 1_000);
+        store.observe("fresh", category(&salt, "ua", "y"), 9_000);
+
+        // At t=10_000 with a 5_000 ms retention: `old` (age 9_000) is purged,
+        // `fresh` (age 1_000) is retained. The purge counts as an eviction.
+        let purged = store.purge_older_than(10_000, 5_000);
+        assert_eq!(purged, 1);
+        assert!(store.get("old").is_none());
+        assert!(store.get("fresh").is_some());
+        assert_eq!(store.evicted(), 1);
+
+        // A second sweep with nothing aged out removes nothing.
+        assert_eq!(store.purge_older_than(10_000, 5_000), 0);
     }
 
     #[test]

@@ -43,6 +43,12 @@ pub trait CandidateSource: Send + Sync {
     fn dropped(&self) -> u64 {
         0
     }
+
+    /// Purge `visitor` from every block (GDPR right-to-be-forgotten).
+    ///
+    /// Defaults to a no-op for backends that erase out of band (e.g. an external
+    /// index deleted by row); the in-memory [`BlockingIndex`] overrides it.
+    fn remove_visitor(&self, _visitor: &str) {}
 }
 
 /// Inverted index mapping each blocking key to the visitors that hash into it.
@@ -114,6 +120,16 @@ impl BlockingIndex {
         self.dropped.load(Ordering::Relaxed)
     }
 
+    /// Remove `visitor` from every block, dropping any block left empty (GDPR
+    /// right-to-be-forgotten). Idempotent: a visitor not present is a no-op.
+    pub fn remove_visitor(&self, visitor: &str) {
+        let mut index = self.lock();
+        index.retain(|_, block| {
+            block.remove(visitor);
+            !block.is_empty()
+        });
+    }
+
     /// Lock the index, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<BlockingKey, HashSet<String>>> {
         self.index.lock().unwrap_or_else(PoisonError::into_inner)
@@ -131,6 +147,10 @@ impl CandidateSource for BlockingIndex {
 
     fn dropped(&self) -> u64 {
         BlockingIndex::dropped(self)
+    }
+
+    fn remove_visitor(&self, visitor: &str) {
+        BlockingIndex::remove_visitor(self, visitor);
     }
 }
 
@@ -181,6 +201,25 @@ mod tests {
         assert_eq!(block.len(), 2);
         assert!(!block.contains("c"));
         assert_eq!(index.dropped(), 1);
+    }
+
+    #[test]
+    fn remove_visitor_purges_from_every_block_and_drops_empties() {
+        let index = BlockingIndex::new();
+        index.insert(key(1), "alice");
+        index.insert(key(1), "bob");
+        index.insert(key(2), "alice");
+
+        index.remove_visitor("alice");
+
+        // alice is gone from both blocks; bob (sharing key(1)) is retained.
+        let recalled = index.candidates(&[key(1), key(2)]);
+        assert!(!recalled.contains("alice"));
+        assert!(recalled.contains("bob"));
+        // key(2) held only alice, so the now-empty block is dropped.
+        assert!(index.candidates(&[key(2)]).is_empty());
+        // Idempotent: removing an absent visitor is a no-op.
+        index.remove_visitor("alice");
     }
 
     #[test]

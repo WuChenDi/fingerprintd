@@ -239,6 +239,44 @@ impl FuzzyStore {
         self.records.observe(visitor, stored, now_ms)
     }
 
+    /// Erase `visitor` entirely from the fingerprint library (GDPR right-to-be-
+    /// forgotten): drop its record and purge it from every blocking block, under
+    /// the [`FuzzyStore::identify`] lock so the removal is atomic against a
+    /// concurrent `identify`. Returns `true` when a record existed.
+    ///
+    /// The aggregate [`frequency`] table is intentionally left untouched: it is a
+    /// value-frequency aggregate with no per-visitor linkage, so it carries no
+    /// personal data to erase and removing a visitor's contribution would corrupt
+    /// the shared `u_i` estimates for unrelated visitors.
+    pub fn erase(&self, visitor: &str) -> bool {
+        let _guard = self
+            .identify_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let existed = self.records.remove(visitor);
+        self.blocking.remove_visitor(visitor);
+        existed
+    }
+
+    /// Proactively purge every record older than `max_age_ms` (by `last_seen`)
+    /// relative to `now_ms`, returning the number removed (compliance retention,
+    /// finding M6). Runs under the [`FuzzyStore::identify`] lock so it is atomic
+    /// against a concurrent `identify`, and is additive to the lazy TTL sweep in
+    /// [`FuzzyStore::observe`] — it ages records out even without observe traffic.
+    ///
+    /// Blocking-index rows for a purged visitor are left as harmless dangling
+    /// keys: stage-one recall re-joins candidates against the record library, and
+    /// a candidate with no record scores `-inf` and can never win, so a stale
+    /// block entry changes no decision. Full block cleanup is reserved for the
+    /// explicit [`FuzzyStore::erase`] path.
+    pub fn purge_expired(&self, now_ms: u64, max_age_ms: u64) -> u64 {
+        let _guard = self
+            .identify_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.records.purge_older_than(now_ms, max_age_ms)
+    }
+
     /// Stage-one candidate recall: the union of visitors sharing any blocking
     /// key with `components` (design §4).
     pub fn candidates(&self, components: &Value) -> HashSet<String> {
@@ -568,6 +606,39 @@ mod tests {
     }
 
     #[test]
+    fn erase_removes_record_and_blocking_so_device_is_new_again() {
+        let store = FuzzyStore::new();
+        let probe = full_probe();
+        store.observe("v1", &probe, 1_000);
+        assert!(store.candidates(&probe).contains("v1"));
+
+        // Erase reports the record existed and drops it plus its blocking rows.
+        assert!(store.erase("v1"));
+        assert!(store.record("v1").is_none());
+        assert!(!store.candidates(&probe).contains("v1"));
+        // Idempotent: a second erase finds nothing.
+        assert!(!store.erase("v1"));
+
+        // Re-identifying the same device now sees no candidate → a new device.
+        let outcome = store.identify(&probe, 2_000);
+        assert!(outcome.is_new_device);
+    }
+
+    #[test]
+    fn purge_expired_drops_aged_records_under_lock() {
+        let store = FuzzyStore::new();
+        store.observe("old", &full_probe(), 1_000);
+        store.observe("fresh", &full_probe(), 9_000);
+
+        // At t=10_000 with a 5_000 ms retention, `old` ages out and `fresh` stays.
+        assert_eq!(store.purge_expired(10_000, 5_000), 1);
+        assert!(store.record("old").is_none());
+        assert!(store.record("fresh").is_some());
+        // Nothing left to age out on a repeat sweep.
+        assert_eq!(store.purge_expired(10_000, 5_000), 0);
+    }
+
+    #[test]
     fn non_object_probe_records_visitor_with_no_components() {
         let store = FuzzyStore::new();
         assert!(store.observe("v1", &json!("not-an-object"), 1_000));
@@ -598,6 +669,10 @@ mod tests {
 
         fn get(&self, visitor: &str) -> Option<super::record::FingerprintRecord> {
             self.inner.get(visitor)
+        }
+
+        fn remove(&self, visitor: &str) -> bool {
+            self.inner.remove(visitor)
         }
     }
 
