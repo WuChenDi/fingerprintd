@@ -12,11 +12,14 @@ name: Deploy edge (Cloudflare)
 # so leaving them blank keeps the Worker's current value):
 #   FP_SALT_SECRET   stable, high-entropy salt seed — set this for a real deploy
 #                    (else blocking keys use a dev placeholder, not deployment-bound)
-#   FP_PROBE_KEY     enables the nonce probe (T8). If you set this, the vendored
-#                    WASM in workers/edge/wasm + clients/web/wasm MUST be rebuilt
-#                    with the SAME key (`FP_PROBE_KEY=… wasm-pack build --target
-#                    web crates/fp-wasm`, then re-vendor) — this workflow ships the
-#                    committed dev-keyed WASM, so a mismatched probe key fails.
+#   FP_PROBE_KEY     enables the nonce probe (T8) and is baked into the vendored
+#                    WASM this workflow rebuilds from source before deploy, so the
+#                    deployed Worker artifact is reproducible rather than the
+#                    committed dev build. NOTE: the Worker verifies probes with the
+#                    RUNTIME key (FpEngine), so this compile-time bake buys supply-
+#                    chain reproducibility, not probe behavior — browser-client
+#                    parity still needs clients/web/wasm rebuilt with the SAME key
+#                    when that front-end deploy lands.
 #   FP_SIGNING_KEY   enables response signing (T9).
 
 on:
@@ -52,6 +55,30 @@ jobs:
       # Bun workspace install from the repo root (one lockfile for both packages).
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # Rebuild the vendored WASM from source so the deployed Worker ships a
+      # reproducible artifact rather than the committed dev build. FP_PROBE_KEY is
+      # baked in at compile time (crates/fp-wasm `option_env!`); unset ⇒ the dev
+      # placeholder. This is supply-chain reproducibility only: /identify still
+      # verifies probes with the RUNTIME key, and browser-client parity is a
+      # clients/web concern (rebuild clients/web/wasm with the same key later).
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Rebuild vendored WASM (crates/fp-wasm -> workers/edge/wasm)
+        env:
+          FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
+        run: wasm-pack build --target web --out-dir workers/edge/wasm crates/fp-wasm
 
       # Optional: apply the drizzle-kit migrations in workers/edge/src/database to
       # the remote D1 bound in wrangler.jsonc before the code goes live.
