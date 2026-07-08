@@ -1,8 +1,7 @@
 /**
  * FULL collector assembly (TC5). Proves `createCollector` composes the stable
- * half + challenge half + probe + `ts` into ONE payload and that `run()`
- * forwards every field to `/identify`, with `stable_components` and
- * `challenge_response` kept SEPARATE.
+ * half + probe + `ts` into ONE payload and that `run()` forwards every field to
+ * `/identify`, with `stable_components` and `probe` kept SEPARATE.
  *
  * There is no headless browser here, so every backend is injected with a
  * deterministic fake — this exercises the WIRING, not real fingerprint values.
@@ -12,7 +11,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { AudioToneParams, CanvasSurface } from '../../src/challenge'
 import { createCollector } from '../../src/collector'
 import type { BotdDetector, FingerprintAgent } from '../../src/fingerprint'
 import { run } from '../../src/index'
@@ -37,32 +35,6 @@ function fakeBotd(): () => Promise<BotdDetector> {
       detect: () => ({ bot: false }),
       getComponents: () => ({ webdriver: false }),
     })
-}
-
-function mockCanvasSurface(): CanvasSurface {
-  const log: string[] = []
-  return {
-    context: {
-      fillStyle: '#000',
-      font: '10px sans',
-      textBaseline: 'alphabetic',
-      fillRect: (x, y, w, h) => log.push(`rect|${x},${y},${w},${h}`),
-      fillText: (t, x, y) => log.push(`text|${t}|${x},${y}`),
-      beginPath: () => log.push('begin'),
-      arc: (x, y, r) => log.push(`arc|${x},${y},${r}`),
-      fill: () => log.push('fill'),
-    },
-    serialize: () => log.join(';'),
-  }
-}
-
-function mockAudioRenderer(params: AudioToneParams): Promise<Float32Array> {
-  const samples = new Float32Array(params.frames)
-  for (let i = 0; i < params.frames; i++) {
-    samples[i] =
-      params.gain * Math.sin((2 * Math.PI * params.frequency * i) / 44100)
-  }
-  return Promise.resolve(samples)
 }
 
 /** A challenge that advertises the probe transform (server has a probe key). */
@@ -93,11 +65,10 @@ const deps = {
     loadFingerprint: fakeFingerprint({ ua: { value: 'Chrome/120' } }),
     loadBotd: fakeBotd(),
   },
-  challenge: { canvas: mockCanvasSurface, audio: mockAudioRenderer },
 }
 
 describe('createCollector', () => {
-  it('assembles stable + challenge + probe + ts, kept separate', async () => {
+  it('assembles stable + probe + ts, kept separate', async () => {
     const collector = createCollector({
       ...deps,
       probe: (nonce) => Promise.resolve(`probe:${nonce}`),
@@ -107,14 +78,11 @@ describe('createCollector', () => {
     const collected = await collector(challengeWithVerify())
 
     // Stable half: component adapted to the server schema (audit H5 — `ua` is an
-    // unmapped scalar, so the FJS `{ value }` wrapper is unwrapped), probe/
-    // challenge NOT mixed in.
+    // unmapped scalar, so the FJS `{ value }` wrapper is unwrapped), probe NOT
+    // mixed in.
     expect(collected.stable_components.ua).toBe('Chrome/120')
     expect(JSON.stringify(collected.stable_components)).not.toContain('probe:')
-    // Challenge half: separate freshness proof.
-    expect(collected.challenge_response?.canvas).toMatch(/^[0-9a-f]{64}$/)
-    expect(collected.challenge_response?.audio).toMatch(/^[0-9a-f]{64}$/)
-    // Probe + ts stamped.
+    // Probe + ts stamped, separate from the matching input.
     expect(collected.probe).toBe('probe:nonce-abc')
     expect(collected.ts).toBe(1_700_000_000_123)
   })
@@ -133,12 +101,12 @@ describe('createCollector', () => {
 
     expect(collected.probe).toBeUndefined()
     expect(probeCalls).toBe(0)
-    // The other halves are still produced.
-    expect(collected.challenge_response).toBeDefined()
+    // The stable half + ts are still produced.
+    expect(collected.stable_components.ua).toBe('Chrome/120')
     expect(collected.ts).toBeTypeOf('number')
   })
 
-  it('run() forwards nonce, ts, probe, stable_components and challenge_response', async () => {
+  it('run() forwards nonce, ts, probe and stable_components', async () => {
     const recorded: RecordedRequest[] = []
     const fetch = mockFetch(
       {
@@ -164,7 +132,6 @@ describe('createCollector', () => {
     expect(sent.ts).toBe(1_700_000_000_123)
     expect(sent.probe).toBe('probe:nonce-abc')
     expect(sent.stable_components.ua).toBe('Chrome/120')
-    expect(sent.challenge_response.canvas).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('computes the real WASM probe end-to-end (vendored dev key)', async () => {

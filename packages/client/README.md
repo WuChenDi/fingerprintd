@@ -9,17 +9,16 @@ by the server is authoritative.
 
 ```
 GET  /challenge    -> nonce + collection plan (+ probe transform when enforced)
-collect(challenge) -> { stable_components, challenge_response?, probe?, ts }
+collect(challenge) -> { stable_components, probe?, ts }
 POST /identify     -> { visitorId, confidence, decision, signals, ... }
 ```
 
-`run()` wires these together with an injected `Collector`. The four evidence
-fields stay in their lanes:
+`run()` wires these together with an injected `Collector`. The evidence fields
+stay in their lanes:
 
 - `stable_components` — the "who is this device" matching input (TC2).
-- `challenge_response` — a nonce-seeded **freshness** proof (TC3). NEVER a
-  matching signal; a different nonce yields a different response by construction.
-- `probe` — `hex(HMAC-SHA256(key, nonce))` computed in WASM (TC4), sent only when
+- `probe` — `hex(HMAC-SHA256(key, nonce))` computed in WASM (TC4), the
+  nonce-seeded **freshness** proof (NEVER a matching signal). Sent only when
   the challenge advertises `collect.challenge.verify` (i.e. the server has a
   probe key). See [WASM probe](#wasm-probe-t8).
 - `ts` — the client clock (Unix ms) at collection (T9 timestamp window).
@@ -31,17 +30,22 @@ import { createCollector, run } from '@fingerprintd/client'
 
 const { identity, signatureValid } = await run({
   baseUrl: 'https://fp.example.com',
-  // The full collector composes the stable half + challenge half + WASM probe.
+  // The full collector composes the stable half + WASM probe.
   collect: createCollector(),
   // Optional: verify the T9 response signature (see below).
   signingKey: /* Uint8Array */ undefined,
 })
 ```
 
-`createCollector()` uses the real FingerprintJS + BotD stack, the nonce-seeded
-canvas/audio challenge, and the WASM probe. Every backend is injectable
-(`{ fingerprint, challenge, probe, now }`) for tests. A trivial `stubCollector`
-is also exported for wiring smoke-tests; it gathers **no real fingerprint**.
+`createCollector()` uses the real FingerprintJS + BotD stack and the WASM probe.
+Every backend is injectable (`{ fingerprint, probe, now }`) for tests. A trivial
+`stubCollector` is also exported for wiring smoke-tests; it gathers **no real
+fingerprint**.
+
+> The server still advertises `collect.challenge.targets` (`['canvas','audio']`)
+> and `collect.challenge.seed`, but the client no longer consumes them: the
+> active-challenge collector was removed (audit L1) because neither backend read
+> its output. The `probe` field is the live freshness control.
 
 ## WASM probe (T8)
 

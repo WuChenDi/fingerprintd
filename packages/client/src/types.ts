@@ -24,7 +24,10 @@ export interface ProbeDescriptor {
 export interface ChallengeProbe {
   /** Nonce used to seed the rendered challenge (equals the top-level nonce). */
   seed: string
-  /** Probe targets to render, e.g. `['canvas', 'audio']`. */
+  /** Probe targets to render, e.g. `['canvas', 'audio']`. The server still
+   *  advertises these, but the client no longer consumes them (audit L1 — the
+   *  active-challenge collector was removed; the `probe` field is the live
+   *  freshness control). Parsed and ignored. */
   targets: string[]
   /** Nonce-probe transform to compute; present only under probe enforcement. */
   verify?: ProbeDescriptor
@@ -53,9 +56,7 @@ export interface ChallengeResponse {
  *
  * Only `nonce` and `stable_components` are always meaningful. The server reads
  * `probe` (T8) and `ts` (T9) only when the matching enforcement is configured;
- * otherwise they are ignored. `challenge_response` is a PRD §5 forward-compat
- * field the current server struct does NOT declare — but the server does not use
- * `deny_unknown_fields`, so sending it is safe and it is simply ignored today.
+ * otherwise they are ignored.
  */
 export interface IdentifyRequest {
   /** The nonce previously minted by `GET /challenge`. */
@@ -69,9 +70,6 @@ export interface IdentifyRequest {
   /** Raw stable components (no nonce mixed in). Arbitrary JSON — the server
    *  scores these but the client never derives an id from them. */
   stable_components: Record<string, unknown>
-  /** Freshness proof of the active challenge (PRD §5, forward-compat). Currently
-   *  ignored by the server; NEVER a matching signal, only a liveness proof. */
-  challenge_response?: Record<string, unknown>
 }
 
 /** Passive network-signal risk summary (PRD §5). */
@@ -86,7 +84,10 @@ export interface Signals {
 export interface IdentifyResponse {
   /** Stable device identifier (server-computed; serde-renamed from visitor_id). */
   visitorId: string
-  /** Fused match confidence in `[0.0, 1.0]`. */
+  /** Fused match confidence in `[0.0, 1.0]`. This is DECISION confidence, not
+   *  identity trust: a first-ever new device can carry high `confidence` yet is
+   *  unestablished — consumers key trust off `is_new_device` / `decision`, not
+   *  this number (M3). */
   confidence: number
   /** Whether this device was newly recorded. */
   is_new_device: boolean

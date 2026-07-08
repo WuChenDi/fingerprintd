@@ -8,9 +8,9 @@
  *    The client never ships a client-side id; the authoritative visitorId is
  *    whatever the server returns from `/identify`.
  *  - BotD signals are merged under a `botd` sub-object of `stable_components`.
- *  - This module emits ONLY `stable_components`. The nonce-seeded
- *    `challenge_response`/`probe` are a SEPARATE freshness proof (TC3) and must
- *    never become a matching signal — so they are absent here.
+ *  - This module emits ONLY `stable_components`. The nonce-seeded `probe` is a
+ *    SEPARATE freshness proof (TC4) and must never become a matching signal — so
+ *    it is absent here.
  *
  * TREE-SHAKING: kept in its own module (not `collect.ts`) so importing the
  * stub/interface does not pull in FingerprintJS or BotD. The heavy deps load
@@ -90,8 +90,8 @@ export function createFingerprintCollector(
       ...adaptFingerprintComponents(components),
       botd,
     }
-    // ONLY stable_components — challenge_response/probe are TC3's separate
-    // freshness proof and must never ride along as a matching signal.
+    // ONLY stable_components — the nonce probe is TC4's separate freshness proof
+    // and must never ride along as a matching signal.
     return { stable_components }
   }
 }
