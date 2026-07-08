@@ -412,7 +412,10 @@ describe('DELETE /visitor/:id erasure (M6b)', () => {
 
   it('returns 404 when no admin key is configured (endpoint disabled)', async () => {
     const { deps, erase } = eraseDeps()
-    const resp = await handleRequest(del('v1', { authorization: 'Bearer x' }), deps)
+    const resp = await handleRequest(
+      del('v1', { authorization: 'Bearer x' }),
+      deps,
+    )
     expect(resp.status).toBe(404)
     expect(erase).not.toHaveBeenCalled()
   })
