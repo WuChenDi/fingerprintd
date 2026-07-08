@@ -44,12 +44,53 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use self::{
-    blocking::{BlockingIndex, BlockingKey},
+    blocking::{BlockingIndex, BlockingKey, DEFAULT_MAX_BLOCK},
     component::{Salt, Stability, Stored},
     frequency::FrequencyTable,
     minhash::MinHashLsh,
     record::{FingerprintRecord, RecordStore},
 };
+
+/// Capacity / TTL bounds for the in-memory fuzzy backends (finding H2).
+///
+/// The in-memory store grows with every distinct visitor and value; left
+/// unbounded that is an availability risk. This policy caps that growth with
+/// **fail-safe** defaults: the [`Default`] bounds are generous, so a fresh
+/// small workload behaves byte-for-byte as before — only unbounded growth is
+/// added. `None` on an optional field means "unbounded".
+///
+/// The bounds are enforced by the concrete backends ([`RecordStore`],
+/// [`FrequencyTable`], [`BlockingIndex`]) and every eviction/drop is counted
+/// (never silent), matching the blocking `dropped()` precedent (design §4).
+/// Applies to a stateful native store built by [`FuzzyStore::new_with_policy`];
+/// the stateless edge store ([`FuzzyStore::deterministic`]) is per-request and
+/// needs no eviction, so it stays unbounded.
+#[derive(Debug, Clone, Copy)]
+pub struct EvictionPolicy {
+    /// Retain at most this many visitors in the record library; `None` is
+    /// unbounded. When exceeded, the oldest-`last_seen` visitor is evicted.
+    pub max_records: Option<usize>,
+    /// Drop record entries not seen within this window (ms) on the next
+    /// observe; `None` disables TTL eviction.
+    pub record_ttl_ms: Option<u64>,
+    /// Cap on the number of *distinct* tracked frequency values; `None` is
+    /// unbounded. A new value beyond the cap is dropped (already-tracked values
+    /// keep counting).
+    pub max_frequency_values: Option<usize>,
+    /// Per-block visitor cap for the blocking index (design §4).
+    pub max_block: usize,
+}
+
+impl Default for EvictionPolicy {
+    fn default() -> Self {
+        Self {
+            max_records: Some(1_000_000),
+            record_ttl_ms: None,
+            max_frequency_values: Some(1_000_000),
+            max_block: DEFAULT_MAX_BLOCK,
+        }
+    }
+}
 
 /// Aggregate store tying the record library, blocking indexes, and frequency
 /// table together behind one observe/candidates surface.
@@ -90,15 +131,31 @@ impl Default for FuzzyStore {
 }
 
 impl FuzzyStore {
-    /// Build an empty store with a fresh random salt and permutation family.
+    /// Build an empty store with a fresh random salt and permutation family,
+    /// using the [`EvictionPolicy::default`] fail-safe bounds.
     #[cfg(feature = "rng")]
     pub fn new() -> Self {
+        Self::new_with_policy(EvictionPolicy::default())
+    }
+
+    /// Build an empty store (random salt) whose in-memory backends enforce the
+    /// given capacity / TTL [`EvictionPolicy`] (finding H2).
+    ///
+    /// [`FuzzyStore::new`] delegates here with the default (generous) policy, so
+    /// a fresh small workload is unaffected while growth is bounded. The
+    /// stateless edge path ([`FuzzyStore::deterministic`]) is intentionally not
+    /// routed through here: it is per-request and stays unbounded.
+    #[cfg(feature = "rng")]
+    pub fn new_with_policy(policy: EvictionPolicy) -> Self {
         Self {
             salt: Salt::random(),
-            records: Box::new(RecordStore::new()),
-            blocking: Box::new(BlockingIndex::new()),
+            records: Box::new(RecordStore::with_capacity(
+                policy.max_records,
+                policy.record_ttl_ms,
+            )),
+            blocking: Box::new(BlockingIndex::with_max_block(policy.max_block)),
             minhash: MinHashLsh::new(),
-            frequency: Box::new(FrequencyTable::new()),
+            frequency: Box::new(FrequencyTable::with_capacity(policy.max_frequency_values)),
         }
     }
 
@@ -376,7 +433,7 @@ fn scalar_bytes(stored: &Stored) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::FuzzyStore;
+    use super::{EvictionPolicy, FuzzyStore};
     use serde_json::json;
 
     /// A full high-stability probe that populates both K1 and K2 keys.
@@ -475,6 +532,24 @@ mod tests {
         let unknown = classify("something_new");
         assert_eq!(unknown.stability, Stability::Medium);
         assert_eq!(unknown.kind, Kind::Category);
+    }
+
+    #[test]
+    fn new_with_policy_bounds_the_record_library() {
+        // A tight record cap of 2: after observing three distinct visitors, the
+        // oldest is evicted so the library never exceeds the cap.
+        let policy = EvictionPolicy {
+            max_records: Some(2),
+            ..EvictionPolicy::default()
+        };
+        let store = FuzzyStore::new_with_policy(policy);
+        store.observe("v1", &full_probe(), 1_000);
+        store.observe("v2", &full_probe(), 2_000);
+        store.observe("v3", &full_probe(), 3_000);
+
+        assert!(store.record("v1").is_none()); // oldest, evicted
+        assert!(store.record("v2").is_some());
+        assert!(store.record("v3").is_some());
     }
 
     #[test]

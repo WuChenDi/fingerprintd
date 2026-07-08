@@ -4,7 +4,7 @@ use std::{fmt, sync::Arc};
 
 use crate::{
     config::Config,
-    fuzzy::FuzzyStore,
+    fuzzy::{EvictionPolicy, FuzzyStore},
     nonce::{InMemoryNonceStore, NonceStore},
     probe::ProbeVerifier,
     signing::ResponseSigner,
@@ -54,9 +54,19 @@ impl AppState {
             .as_ref()
             .filter(|key| key.is_configured())
             .map(|key| Arc::new(ResponseSigner::new(key.as_bytes())));
+        // Bound in-memory fuzzy growth (finding H2). A `0` TTL means "off"
+        // (unbounded); the caps are generous fail-safe defaults so a small
+        // workload is unaffected.
+        let policy = EvictionPolicy {
+            max_records: Some(config.fuzzy_max_records),
+            record_ttl_ms: (config.fuzzy_record_ttl_secs > 0)
+                .then(|| config.fuzzy_record_ttl_secs.saturating_mul(1000)),
+            max_frequency_values: Some(config.fuzzy_max_frequency_values),
+            max_block: config.fuzzy_max_block,
+        };
         Self {
             nonce_store: Arc::new(InMemoryNonceStore::new(ttl)),
-            matcher: Arc::new(FuzzyStore::new()),
+            matcher: Arc::new(FuzzyStore::new_with_policy(policy)),
             nonce_ttl_secs: config.nonce_ttl_secs,
             trust_edge_headers: config.trust_edge_headers,
             probe,
