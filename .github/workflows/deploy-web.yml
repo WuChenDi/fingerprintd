@@ -63,7 +63,11 @@ jobs:
       - name: Rebuild SDK WASM (crates/fp-wasm -> packages/client/wasm)
         env:
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
-        run: wasm-pack build --target web --out-dir packages/client/wasm crates/fp-wasm
+        # `--out-dir` is resolved relative to the CRATE dir, so pass an ABSOLUTE
+        # path — a repo-relative `packages/client/wasm` would silently land in
+        # `crates/fp-wasm/packages/client/wasm` and the real vendor dir (which the
+        # SPA bundles) would keep its committed dev-keyed WASM.
+        run: wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/packages/client/wasm" crates/fp-wasm
 
       # The SPA consumes the built SDK — its dist/ is gitignored, so build it
       # (bundling the freshly-keyed WASM) before the app so `@fingerprintd/client`
