@@ -48,7 +48,7 @@ function fakeBotd(
 }
 
 describe('createFingerprintCollector', () => {
-  it('passes raw FingerprintJS components through into stable_components', async () => {
+  it('ADAPTS FingerprintJS components into the server schema (audit H5)', async () => {
     const components = {
       fonts: { value: ['Arial'], duration: 3 },
       timezone: { value: 'UTC', duration: 1 },
@@ -60,8 +60,10 @@ describe('createFingerprintCollector', () => {
 
     const { stable_components } = await collect(sampleChallenge())
 
-    expect(stable_components.fonts).toEqual({ value: ['Arial'], duration: 3 })
-    expect(stable_components.timezone).toEqual({ value: 'UTC', duration: 1 })
+    // The FJS `{ value, duration }` wrapper is unwrapped: `fonts` (a Set target)
+    // keeps its array and `timezone` (a scalar) is stored bare.
+    expect(stable_components.fonts).toEqual(['Arial'])
+    expect(stable_components.timezone).toBe('UTC')
   })
 
   it('DISCARDS the FingerprintJS visitorId/hash (never in the payload)', async () => {
@@ -149,7 +151,8 @@ describe('createFingerprintCollector default loaders', () => {
     expect(fpLoad).toHaveBeenCalledOnce()
     // BotD monitoring must be OFF so the OSS detector never phones home.
     expect(botdLoad).toHaveBeenCalledWith({ monitoring: false })
-    expect(stable_components.ua).toEqual({ value: 'x' })
+    // `ua` is an unmapped scalar: the adapter passes it through unwrapped.
+    expect(stable_components.ua).toBe('x')
     expect(stable_components.botd).toEqual({
       detection: { bot: false },
       signals: { webdriver: false },

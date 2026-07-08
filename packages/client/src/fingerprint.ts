@@ -24,6 +24,7 @@
 
 import { load as loadBotd } from '@fingerprintjs/botd'
 import FingerprintJS from '@fingerprintjs/fingerprintjs'
+import { adaptFingerprintComponents } from './adapter'
 import type { Collected, Collector } from './collect'
 
 /** Minimal structural view of a loaded FingerprintJS agent — only the surface
@@ -56,8 +57,12 @@ export interface FingerprintCollectorDeps {
  *
  * The returned collector ignores the challenge (the stable half is nonce-free
  * by design — PRD §4.1) and produces only `stable_components`:
- *  - every RAW FingerprintJS component, spread verbatim, and
- *  - the BotD detection result + raw signals under a `botd` key.
+ *  - every FingerprintJS component, ADAPTED to the server matching schema
+ *    (audit H5 — {@link adaptFingerprintComponents} unwraps the FJS
+ *    `{ value, duration }` wrapper and renames keys; a verbatim spread would be
+ *    silently dropped by the server matcher), and
+ *  - the BotD detection result + raw signals under a `botd` key (BotD is not
+ *    adapted — it rides untouched under `botd`).
  * The FingerprintJS `visitorId`/hash is never read into the payload.
  */
 export function createFingerprintCollector(
@@ -79,7 +84,12 @@ export function createFingerprintCollector(
       signals: detector.getComponents(),
     }
 
-    const stable_components: Record<string, unknown> = { ...components, botd }
+    // Adapt FJS components to the server matching schema before they become
+    // stable_components (audit H5); botd is merged untouched under its own key.
+    const stable_components: Record<string, unknown> = {
+      ...adaptFingerprintComponents(components),
+      botd,
+    }
     // ONLY stable_components — challenge_response/probe are TC3's separate
     // freshness proof and must never ride along as a matching signal.
     return { stable_components }
