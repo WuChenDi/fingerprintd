@@ -1,0 +1,83 @@
+name: WASM drift
+
+# Guards that the committed WASM artifacts in `apps/edge/wasm` and
+# `packages/client/wasm` are a reproducible build of `crates/fp-wasm` source —
+# nothing else in CI catches a source change that was never re-vendored, since
+# the artifacts are hand-committed and only rebuilt by the manual deploy jobs.
+#
+# HOW IT WORKS: rebuild both vendor dirs from source, then `git diff --exit-code`.
+# A clean tree ⇒ the committed bytes match the source. This is only reliable
+# because three things are held fixed:
+#
+#   1. TOOLCHAIN PIN. `wasm-pack build` is byte-deterministic ONLY within a fixed
+#      toolchain. rustc is pinned to 1.96.0 (NOT @stable — stable floats and the
+#      next release would shift toolchain metadata bytes and break the diff), and
+#      wasm-pack to 0.15.0 (it auto-downloads its own pinned wasm-opt). Bump both
+#      here and re-vendor in the same commit when you intentionally upgrade.
+#
+#   2. FP_PROBE_KEY=test-probe-secret. The committed artifacts embed the shared
+#      TEST probe key at compile time (crates/fp-wasm `option_env!`). The headless
+#      parity tests assert this key yields the vector
+#      ad83144894f917b94072c2f7b3246af66d3bc5a450562ccf3671ed64d33137d0
+#      (packages/client/tests/unit/probe.test.ts + fp-wasm matches_server_probe_vector).
+#      Rebuilding with a different / unset key would change the bytes AND break
+#      those tests, so this MUST match what the artifacts were vendored with.
+#      (Real deploys re-key via deploy-edge.yml / deploy-web.yml; those artifacts
+#      are never committed.)
+#
+#   3. ABSOLUTE --out-dir FOOTGUN. wasm-pack resolves `--out-dir` RELATIVE TO THE
+#      CRATE dir, not cwd. A repo-relative `apps/edge/wasm` would silently land in
+#      `crates/fp-wasm/apps/edge/wasm` and vendor NOTHING (the diff would falsely
+#      pass). Pass an absolute `$GITHUB_WORKSPACE/...` path, mirroring the deploy
+#      workflows.
+#
+# RESIDUAL RISK: byte-exactness across machines is not guaranteed. This asserts
+# reproducibility on the pinned GitHub-hosted `ubuntu-latest` toolchain; a local
+# rebuild on a different OS/arch may differ. Re-vendor from CI (or a matching
+# environment) when the guard flags drift you did not introduce.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  wasm-drift:
+    name: wasm-drift (rebuild + diff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned EXACTLY — see comment 1 above. Do NOT switch to @stable.
+      - name: Install pinned Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Pinned EXACTLY — wasm-pack auto-downloads its own matching wasm-opt.
+      - name: Install pinned wasm-pack (0.15.0)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Rebuild vendored WASM from source (both targets)
+        env:
+          # Must match the key the committed artifacts were vendored with — see
+          # comment 2. Absolute --out-dir — see comment 3.
+          FP_PROBE_KEY: test-probe-secret
+        run: |
+          wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/apps/edge/wasm"      crates/fp-wasm
+          wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/packages/client/wasm" crates/fp-wasm
+
+      - name: Assert no drift
+        run: |
+          if ! git diff --exit-code -- apps/edge/wasm packages/client/wasm; then
+            echo "::error::Committed WASM artifacts drifted from crates/fp-wasm source."
+            echo "Re-vendor with the pinned toolchain (rustc 1.96.0 / wasm-pack 0.15.0) and commit:"
+            echo "  FP_PROBE_KEY=test-probe-secret wasm-pack build --target web --out-dir \"\$PWD/apps/edge/wasm\"      crates/fp-wasm"
+            echo "  FP_PROBE_KEY=test-probe-secret wasm-pack build --target web --out-dir \"\$PWD/packages/client/wasm\" crates/fp-wasm"
+            exit 1
+          fi
