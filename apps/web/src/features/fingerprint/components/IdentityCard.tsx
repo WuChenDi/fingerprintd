@@ -1,6 +1,12 @@
 import type { IdentifyResponse } from '@cdlab/fingerprintd-client'
 import { useTranslation } from 'react-i18next'
-import { Card, CardContent } from '@/shared/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/shared/components/ui/card'
 import { cn } from '@/shared/lib/utils'
 import { RidgeMeter } from './RidgeMeter'
 
@@ -38,22 +44,20 @@ export function IdentityCard({ identity }: { identity: IdentifyResponse }) {
   const { t } = useTranslation()
 
   return (
-    <Card className="overflow-hidden pt-0">
-      {/* Verdict header rail — the meter is the readout, the rail names it. */}
-      <div
-        className={cn(
-          'flex items-center justify-between border-b bg-muted/30 px-4 py-3',
-          verdictAccent[identity.decision],
-        )}
-      >
-        <span className="text-[0.7rem] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          {t('Identity')}
-        </span>
-        <span className="flex items-center gap-2 text-sm font-semibold text-current">
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle>{t('Identity')}</CardTitle>
+        {/* The meter is the readout; the verdict names it. */}
+        <CardAction
+          className={cn(
+            'flex items-center gap-2 text-sm font-semibold',
+            verdictAccent[identity.decision],
+          )}
+        >
           <span className="size-2 rounded-full bg-current" />
           {t(identity.decision)}
-        </span>
-      </div>
+        </CardAction>
+      </CardHeader>
 
       <CardContent className="space-y-5">
         <div className="flex justify-center pt-1">

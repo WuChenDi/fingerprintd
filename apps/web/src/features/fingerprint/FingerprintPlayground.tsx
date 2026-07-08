@@ -26,15 +26,17 @@ export function FingerprintPlayground() {
             </div>
           )}
           {result && <IdentityCard identity={result.identity} />}
-          {result && <SignatureCard signature={result.signature} />}
         </div>
 
         <div className="min-w-0 space-y-6">
           {result ? (
-            <EvidenceLanes
-              challenge={result.challenge}
-              collected={result.collected}
-            />
+            <>
+              <EvidenceLanes
+                challenge={result.challenge}
+                collected={result.collected}
+              />
+              <SignatureCard signature={result.signature} />
+            </>
           ) : (
             status !== 'running' && <EmptyPipeline />
           )}
