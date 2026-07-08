@@ -14,7 +14,7 @@ echo "==> cargo clean"
 cargo clean
 
 # --- TypeScript ------------------------------------------------------------
-for dir in clients/web/node_modules clients/web/dist; do
+for dir in packages/client/node_modules packages/client/dist; do
   if [ -d "$ROOT/$dir" ]; then
     echo "==> rm -rf $dir"
     rm -rf "${ROOT:?}/$dir"

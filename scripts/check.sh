@@ -27,7 +27,7 @@ cargo test -p fp-wasm
 
 # --- TypeScript gate -------------------------------------------------------
 echo "==> TypeScript gate"
-cd "$ROOT/clients/web"
+cd "$ROOT/packages/client"
 bun install
 bunx @biomejs/biome check .
 bun run typecheck
