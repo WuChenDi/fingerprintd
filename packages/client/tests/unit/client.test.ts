@@ -40,7 +40,6 @@ describe('identify', () => {
       ts: 1_700_000_000_000,
       probe: 'deadbeef',
       stable_components: { userAgent: 'Chrome/120' },
-      challenge_response: { canvas: 'abc' },
     }
     await identify('https://fp.example.com', body, { fetch })
 
@@ -63,7 +62,6 @@ describe('identify', () => {
     expect(sent).toEqual({ nonce: 'n1', stable_components: { ua: 'x' } })
     expect('ts' in sent).toBe(false)
     expect('probe' in sent).toBe(false)
-    expect('challenge_response' in sent).toBe(false)
   })
 
   it('returns the parsed body plus signature headers when signed', async () => {

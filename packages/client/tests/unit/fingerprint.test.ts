@@ -7,7 +7,7 @@
  *  - raw FingerprintJS components are passed through into `stable_components`;
  *  - the FingerprintJS `visitorId`/hash is DISCARDED (never in the payload);
  *  - BotD detection + signals are present under `stable_components.botd`;
- *  - NO `challenge_response`/`probe` is emitted by this half.
+ *  - NO `probe` is emitted by this half.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -99,7 +99,7 @@ describe('createFingerprintCollector', () => {
     expect(order).toEqual(['collect', 'detect', 'getComponents'])
   })
 
-  it('emits ONLY stable_components — no challenge_response or probe', async () => {
+  it('emits ONLY stable_components — no probe', async () => {
     const collect = createFingerprintCollector({
       loadFingerprint: fakeFingerprint({ ua: { value: 'x' } }),
       loadBotd: fakeBotd({ bot: false }, {}),
@@ -107,7 +107,6 @@ describe('createFingerprintCollector', () => {
 
     const collected = await collect(sampleChallenge())
 
-    expect(collected.challenge_response).toBeUndefined()
     expect(collected.probe).toBeUndefined()
     expect(Object.keys(collected)).toEqual(['stable_components'])
   })

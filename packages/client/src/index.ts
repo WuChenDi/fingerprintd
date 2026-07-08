@@ -4,8 +4,8 @@
  *
  * The client only COLLECTS evidence; the SERVER judges. It sends RAW stable
  * components and discards any client-side id — the visitorId is authoritative
- * only as returned by the server. The active-challenge proof is kept SEPARATE
- * from the stable components (freshness, never a matching signal).
+ * only as returned by the server. The HMAC nonce probe is kept SEPARATE from the
+ * stable components (freshness, never a matching signal).
  *
  * ENVIRONMENT LIMIT: no headless browser here → canvas/audio/webgl cannot be
  * exercised for real, and there is no real in-browser e2e. Tests are unit/mock
@@ -19,15 +19,6 @@ import type { Collector } from './collect'
 import { verifySignature } from './signature'
 import type { IdentifyRequest, IdentifyResponse } from './types'
 
-export type {
-  AudioRenderer,
-  AudioToneParams,
-  CanvasContext2D,
-  CanvasSurface,
-  CanvasSurfaceFactory,
-  ChallengeCollectorOptions,
-} from './challenge'
-export { challengeCollector, collectChallengeResponse } from './challenge'
 export type { ClientOptions, FetchLike, IdentifyResult } from './client'
 export { getChallenge, identify } from './client'
 export type { Collected, Collector } from './collect'
@@ -96,9 +87,6 @@ export async function run(options: RunOptions): Promise<RunResult> {
   }
   if (collected.ts !== undefined) request.ts = collected.ts
   if (collected.probe !== undefined) request.probe = collected.probe
-  if (collected.challenge_response !== undefined) {
-    request.challenge_response = collected.challenge_response
-  }
 
   const { result, bodyBytes, timestamp, signature } = await identify(
     baseUrl,

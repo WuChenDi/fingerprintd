@@ -1,26 +1,22 @@
 /**
- * The FULL {@link Collector} (TC5) — it composes the two halves plus the probe
+ * The FULL {@link Collector} (TC5) — it composes the stable half plus the probe
  * and a client timestamp into the single evidence payload `run()` submits:
  *
- *   { stable_components, challenge_response, probe?, ts }
+ *   { stable_components, probe?, ts }
  *
  * DESIGN (PRD §4.1):
  *  - STABLE half (TC2, `createFingerprintCollector`) — the "who is this device"
  *    matching input.
- *  - CHALLENGE half (TC3, `collectChallengeResponse`) — the nonce-seeded
- *    freshness proof. Kept SEPARATE from `stable_components`; it is NEVER a
- *    matching signal.
  *  - PROBE (TC4 WASM, `wasmProbeFn`) — `hex(HMAC-SHA256(key, nonce))` (T8),
  *    computed ONLY when the challenge advertises `collect.challenge.verify`
- *    (i.e. the server has a probe key configured).
+ *    (i.e. the server has a probe key configured). Kept SEPARATE from
+ *    `stable_components`; it is NEVER a matching signal, only a freshness proof.
  *  - `ts` — the client clock at collection (T9).
  *
  * Every backend is injectable so the whole assembly is testable without a real
  * browser or the WASM (there is no headless browser in this environment).
  */
 
-import type { ChallengeCollectorOptions } from './challenge'
-import { collectChallengeResponse } from './challenge'
 import type { Collected, Collector } from './collect'
 import type { FingerprintCollectorDeps } from './fingerprint'
 import { createFingerprintCollector } from './fingerprint'
@@ -32,8 +28,6 @@ import { wasmProbeFn } from './probe'
 export interface FullCollectorOptions {
   /** Stable-half (FingerprintJS + BotD) loaders. */
   fingerprint?: FingerprintCollectorDeps
-  /** Challenge-half canvas/audio backends. */
-  challenge?: ChallengeCollectorOptions
   /** Nonce-probe function. Defaults to the WASM {@link wasmProbeFn}. */
   probe?: ProbeFn
   /** Client clock in Unix ms. Injectable for deterministic tests; defaults to
@@ -44,10 +38,10 @@ export interface FullCollectorOptions {
 /**
  * Build the full {@link Collector}.
  *
- * The returned collector runs the stable and challenge halves, computes the
- * probe when the challenge asks to `verify` it, stamps the client `ts`, and
- * returns the assembled evidence. `stable_components` and `challenge_response`
- * stay separate by construction.
+ * The returned collector runs the stable half, computes the probe when the
+ * challenge asks to `verify` it, stamps the client `ts`, and returns the
+ * assembled evidence. `stable_components` and `probe` stay separate by
+ * construction.
  */
 export function createCollector(options: FullCollectorOptions = {}): Collector {
   const stableCollector = createFingerprintCollector(options.fingerprint)
@@ -56,14 +50,9 @@ export function createCollector(options: FullCollectorOptions = {}): Collector {
 
   return async (challenge): Promise<Collected> => {
     const { stable_components } = await stableCollector(challenge)
-    const challenge_response = await collectChallengeResponse(
-      challenge,
-      options.challenge,
-    )
 
     const collected: Collected = {
       stable_components,
-      challenge_response,
       ts: now(),
     }
     // Compute the probe only when the server advertises it (probe_key set).

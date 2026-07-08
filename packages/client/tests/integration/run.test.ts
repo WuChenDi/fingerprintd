@@ -102,7 +102,7 @@ describe('run', () => {
     expect(signatureValid).toBe(false)
   })
 
-  it('forwards probe and challenge_response from a custom collector', async () => {
+  it('forwards probe from a custom collector', async () => {
     const recorded: RecordedRequest[] = []
     const fetch = mockFetch(
       {
@@ -111,10 +111,9 @@ describe('run', () => {
       },
       recorded,
     )
-    const collector: Collector = (challenge) =>
+    const collector: Collector = () =>
       Promise.resolve({
         stable_components: { userAgent: 'Chrome/120' },
-        challenge_response: { canvas: `rendered:${challenge.nonce}` },
         probe: 'cafebabe',
       })
 
@@ -123,7 +122,7 @@ describe('run', () => {
     const identifyRequest = recorded.find((r) => r.url.endsWith('/identify'))
     const sent = JSON.parse(identifyRequest?.body ?? '{}')
     expect(sent.probe).toBe('cafebabe')
-    expect(sent.challenge_response).toEqual({ canvas: 'rendered:nonce-abc' })
+    expect(sent.challenge_response).toBeUndefined()
     expect(sent.stable_components).toEqual({ userAgent: 'Chrome/120' })
   })
 })
