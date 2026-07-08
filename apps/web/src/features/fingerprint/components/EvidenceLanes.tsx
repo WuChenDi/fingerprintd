@@ -54,8 +54,7 @@ export function EvidenceLanes({
             {t('nonce')}: {challenge.nonce}
           </span>
           <span>
-            {t('expires in')}: {challenge.expires_in}
-            {t('seconds')}
+            {t('expires in')}: {challenge.expires_in} {t('seconds')}
           </span>
           <span>
             {t('targets')}: [{challenge.collect.challenge.targets.join(', ')}]

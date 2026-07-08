@@ -1,100 +1,100 @@
 import type { IdentifyResponse } from '@cdlab/fingerprintd-client'
 import { useTranslation } from 'react-i18next'
-import { Badge } from '@/shared/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/shared/components/ui/card'
-import { Separator } from '@/shared/components/ui/separator'
+import { Card, CardContent } from '@/shared/components/ui/card'
 import { cn } from '@/shared/lib/utils'
+import { RidgeMeter } from './RidgeMeter'
 
-const decisionVariant: Record<
-  IdentifyResponse['decision'],
-  'default' | 'secondary' | 'outline'
-> = {
-  match: 'default',
-  review: 'secondary',
-  new_device: 'outline',
+const verdictAccent: Record<IdentifyResponse['decision'], string> = {
+  match: 'text-match',
+  review: 'text-review',
+  new_device: 'text-newdev',
 }
 
-function Row({
+function Signal({
   label,
-  children,
+  value,
+  tone,
 }: {
   label: string
-  children: React.ReactNode
+  value: React.ReactNode
+  tone?: 'default' | 'muted'
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 text-sm">
+    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-2 text-sm last:border-0">
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{children}</span>
+      <span
+        className={cn(
+          'font-medium',
+          tone === 'muted' && 'text-muted-foreground',
+        )}
+      >
+        {value}
+      </span>
     </div>
   )
 }
 
 export function IdentityCard({ identity }: { identity: IdentifyResponse }) {
   const { t } = useTranslation()
-  const pct = Math.round(identity.confidence * 100)
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
+    <Card className="overflow-hidden pt-0">
+      {/* Verdict header rail — the meter is the readout, the rail names it. */}
+      <div
+        className={cn(
+          'flex items-center justify-between border-b bg-muted/30 px-4 py-3',
+          verdictAccent[identity.decision],
+        )}
+      >
+        <span className="text-[0.7rem] font-medium uppercase tracking-[0.18em] text-muted-foreground">
           {t('Identity')}
-          <Badge variant={decisionVariant[identity.decision]}>
-            {t(identity.decision)}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1">
-          <span className="text-xs text-muted-foreground">visitorId</span>
-          <p className="break-all font-mono text-sm">{identity.visitorId}</p>
+        </span>
+        <span className="flex items-center gap-2 text-sm font-semibold text-current">
+          <span className="size-2 rounded-full bg-current" />
+          {t(identity.decision)}
+        </span>
+      </div>
+
+      <CardContent className="space-y-5">
+        <div className="flex justify-center pt-1">
+          <RidgeMeter
+            value={identity.confidence}
+            decision={identity.decision}
+            label={t('Confidence')}
+          />
         </div>
 
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{t('Confidence')}</span>
-            <span className="font-mono font-medium">{pct}%</span>
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn(
-                'h-full rounded-full transition-all',
-                identity.decision === 'match'
-                  ? 'bg-primary'
-                  : 'bg-muted-foreground',
-              )}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-
-        <Separator />
-
-        <div className="space-y-2">
-          <Row label={t('New device')}>
-            {identity.is_new_device ? t('Yes') : t('No')}
-          </Row>
-          <Row label={t('Collision risk')}>
-            {identity.collision_risk ? t('Yes') : t('No')}
-          </Row>
-        </div>
-
-        <Separator />
-
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            {t('Signals')}
+          <span className="text-[0.7rem] uppercase tracking-[0.14em] text-muted-foreground">
+            visitorId
           </span>
-          <Row label={t('UA / TLS consistent')}>
-            {identity.signals.ua_tls_consistent ? t('Yes') : t('No')}
-          </Row>
-          <Row label={t('IP risk')}>
-            <span className="font-mono">{identity.signals.ip_risk}</span>
-          </Row>
+          <p className="break-all rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-sm">
+            {identity.visitorId}
+          </p>
+        </div>
+
+        <div>
+          <Signal
+            label={t('New device')}
+            value={identity.is_new_device ? t('Yes') : t('No')}
+            tone={identity.is_new_device ? 'default' : 'muted'}
+          />
+          <Signal
+            label={t('Collision risk')}
+            value={identity.collision_risk ? t('Yes') : t('No')}
+            tone={identity.collision_risk ? 'default' : 'muted'}
+          />
+          <Signal
+            label={t('UA / TLS consistent')}
+            value={identity.signals.ua_tls_consistent ? t('Yes') : t('No')}
+            tone={identity.signals.ua_tls_consistent ? 'muted' : 'default'}
+          />
+          <Signal
+            label={t('IP risk')}
+            value={
+              <span className="font-mono">{identity.signals.ip_risk}</span>
+            }
+          />
         </div>
       </CardContent>
     </Card>

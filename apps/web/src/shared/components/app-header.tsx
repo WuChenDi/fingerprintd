@@ -23,9 +23,13 @@ export function AppHeader() {
       )}
     >
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-        <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <Fingerprint className="size-5 text-primary" />
-          fingerprintd
+        <span className="flex items-center gap-2.5">
+          <span className="flex size-7 items-center justify-center rounded-md bg-primary/12 text-primary ring-1 ring-primary/20">
+            <Fingerprint className="size-4" />
+          </span>
+          <span className="font-mono text-sm font-medium tracking-tight">
+            fingerprint<span className="text-primary">d</span>
+          </span>
         </span>
         <div className="flex items-center gap-2">
           <LanguageToggle />

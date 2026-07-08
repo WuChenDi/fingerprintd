@@ -69,8 +69,23 @@ export const zh: Record<string, string> = {
   'not verified (no key)': '未校验（无密钥）',
   'Server did not sign this response.': '服务端未对此响应签名。',
 
+  // Hero
+  'challenge → identify': '挑战 → 识别',
+  'Lift a device fingerprint,': '提取设备指纹，',
+  'read the verdict.': '读取判定结果。',
+  'Point the collect-only client at a fingerprintd server. It answers a nonce challenge, gathers stable device signals in WASM, and returns a signed match / review / new-device call.':
+    '将「仅采集」客户端指向 fingerprintd 服务端：它应答 nonce 挑战，在 WASM 中采集稳定设备信号，并返回带签名的 匹配 / 待审 / 新设备 判定。',
+
   // Empty state
   'No run yet': '尚未运行',
   'Fill in a server base URL and run the flow to see the result here.':
     '填写服务端 Base URL 并运行流程，结果将显示在此处。',
+  Collect: '采集',
+  Identify: '识别',
+  'Server issues a nonce and the list of signals to collect.':
+    '服务端下发 nonce 与待采集的信号清单。',
+  'Client gathers stable components and computes an HMAC probe in WASM.':
+    '客户端采集稳定组件，并在 WASM 中计算 HMAC probe。',
+  'Server judges the evidence and returns a verdict with confidence.':
+    '服务端评判证据，返回带置信度的判定结果。',
 }

@@ -4,15 +4,120 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0a" />
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-    <title>fingerprintd — challenge/identify playground</title>
+    <!-- Theme color (light / dark) -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141619" />
+
+    <!-- Primary metadata -->
+    <title>fingerprintd — challenge / identify playground</title>
     <meta
       name="description"
-      content="Browser playground for the fingerprintd challenge/identify flow: run getChallenge -> collect -> identify against a server and visualize visitorId, confidence, decision, signals, and the collected evidence."
+      content="Browser playground for the fingerprintd anti-fraud engine. Point the collect-only client at a server, run the nonce challenge → collect → identify flow, and inspect the visitorId, confidence, match / review / new-device verdict, and collected evidence."
     />
-    <meta name="robots" content="noindex, nofollow" />
+    <meta name="application-name" content="fingerprintd" />
+    <meta name="author" content="wudi" />
+    <meta name="creator" content="wudi" />
+    <meta name="publisher" content="wudi" />
+    <meta name="keywords" content="fingerprintd, device fingerprinting, browser fingerprint, anti-fraud, bot detection, visitor identification, challenge-response, WebAssembly, HMAC probe, playground" />
+    <meta name="category" content="technology" />
+    <meta name="referrer" content="no-referrer-when-downgrade" />
+    <link rel="author" href="https://github.com/WuChenDi" />
+    <link rel="canonical" href="https://fingerprintd-web.cdlab.workers.dev/" />
+
+    <!-- Crawler directives -->
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+
+    <!-- Apple / mobile web app -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="fingerprintd" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="fingerprintd" />
+    <meta property="og:title" content="fingerprintd — challenge / identify playground" />
+    <meta
+      property="og:description"
+      content="Point the collect-only client at a fingerprintd server, run the nonce challenge → collect → identify flow, and read the visitorId, confidence, verdict, and collected evidence."
+    />
+    <meta property="og:url" content="https://fingerprintd-web.cdlab.workers.dev/" />
+    <meta property="og:image" content="https://fingerprintd-web.cdlab.workers.dev/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="fingerprintd — challenge / identify playground" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="fingerprintd — challenge / identify playground" />
+    <meta
+      name="twitter:description"
+      content="Point the collect-only client at a fingerprintd server, run the nonce challenge → collect → identify flow, and read the visitorId, confidence, verdict, and collected evidence."
+    />
+    <meta name="twitter:image" content="https://fingerprintd-web.cdlab.workers.dev/og.png" />
+    <meta name="twitter:image:alt" content="fingerprintd — challenge / identify playground" />
+
+    <!-- JSON-LD structured data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Person",
+            "@id": "https://fingerprintd-web.cdlab.workers.dev/#person",
+            "name": "wudi",
+            "url": "https://github.com/WuChenDi",
+            "sameAs": ["https://github.com/WuChenDi"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://fingerprintd-web.cdlab.workers.dev/#website",
+            "name": "fingerprintd",
+            "url": "https://fingerprintd-web.cdlab.workers.dev/",
+            "description": "Browser playground for the fingerprintd anti-fraud engine: run the challenge → collect → identify flow against a server and visualize the visitor identity, confidence, verdict, and collected evidence.",
+            "inLanguage": ["en", "zh"],
+            "author": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "creator": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "publisher": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "copyrightHolder": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" }
+          },
+          {
+            "@type": "WebApplication",
+            "@id": "https://fingerprintd-web.cdlab.workers.dev/#webapp",
+            "name": "fingerprintd — challenge / identify playground",
+            "url": "https://fingerprintd-web.cdlab.workers.dev/",
+            "description": "Point the collect-only client at a fingerprintd server, run the nonce challenge → collect → identify flow, and inspect the visitorId, confidence, match / review / new-device verdict, network signals, and the collected evidence.",
+            "applicationCategory": "SecurityApplication",
+            "operatingSystem": "Any (web browser)",
+            "browserRequirements": "Requires a modern browser with WebAssembly support.",
+            "image": "https://fingerprintd-web.cdlab.workers.dev/og.png",
+            "inLanguage": ["en", "zh"],
+            "isAccessibleForFree": true,
+            "isPartOf": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#website" },
+            "author": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "creator": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "publisher": { "@id": "https://fingerprintd-web.cdlab.workers.dev/#person" },
+            "featureList": [
+              "Nonce challenge / identify flow against any fingerprintd server",
+              "Stable-component collection with an HMAC probe computed in WebAssembly",
+              "Visitor identification with match / review / new-device verdict and confidence",
+              "Response-signature (HMAC-SHA256) verification",
+              "Collected-evidence inspector for stable components, probe, and timestamp"
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
