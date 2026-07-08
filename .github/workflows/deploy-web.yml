@@ -8,6 +8,10 @@ name: Deploy web (Cloudflare)
 # shared with deploy-edge.yml:
 #   CLOUDFLARE_API_TOKEN   deploy auth for wrangler (Workers Scripts:Edit)
 #   CLOUDFLARE_ACCOUNT_ID  deploy target account id
+# Optional (must equal the edge Worker's runtime key for the browser probe to
+# verify against `fingerprintd-edge`, else /identify returns 401 under probe
+# enforcement — same secret deploy-edge.yml bakes into the edge WASM):
+#   FP_PROBE_KEY           browser nonce-probe key (T8), baked into the SDK WASM
 
 on:
   workflow_dispatch:
@@ -38,8 +42,32 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Rebuild the SDK's vendored WASM from source with the deployment's probe
+      # key, so the browser computes the SAME T8 probe the edge Worker verifies.
+      # The committed WASM is dev-keyed (test vector); without this the deployed
+      # playground would ship it and /identify would 401 under probe enforcement.
+      # Mirrors deploy-edge.yml's rebuild. FP_PROBE_KEY unset ⇒ the dev default.
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Rebuild SDK WASM (crates/fp-wasm -> packages/client/wasm)
+        env:
+          FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
+        run: wasm-pack build --target web --out-dir packages/client/wasm crates/fp-wasm
+
       # The SPA consumes the built SDK — its dist/ is gitignored, so build it
-      # before the app so `@fingerprintd/client` resolves.
+      # (bundling the freshly-keyed WASM) before the app so `@fingerprintd/client`
+      # resolves.
       - name: Build SDK (@fingerprintd/client)
         run: bun run --filter @fingerprintd/client build
 
