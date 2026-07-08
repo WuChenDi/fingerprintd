@@ -20,7 +20,8 @@
     "lint": "biome check .",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
-    "build": "bun run --filter '*' build"
+    "build": "bun run --filter '*' build",
+    "verify:edge": "bun scripts/verify-deploy.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2"
