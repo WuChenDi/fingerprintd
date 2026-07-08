@@ -87,7 +87,7 @@ jobs:
         run: bun run build
 
   web-app:
-    name: web-app (apps/web: biome + typecheck + build)
+    name: "web-app (apps/web: biome + typecheck + build)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
