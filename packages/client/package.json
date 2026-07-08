@@ -1,0 +1,39 @@
+{
+  "name": "@fingerprintd/client",
+  "version": "0.0.0",
+  "description": "Browser SDK for the fingerprintd challenge/identify flow (collect-only; the server judges).",
+  "type": "module",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm": "./wasm/fp_wasm_bg.wasm"
+  },
+  "files": [
+    "dist",
+    "wasm/fp_wasm_bg.wasm"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fingerprintjs/botd": "^2.0.0",
+    "@fingerprintjs/fingerprintjs": "^5"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "jsdom": "^29.1.1",
+    "tsdown": "^0.22.3",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

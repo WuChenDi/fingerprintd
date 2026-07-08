@@ -1,0 +1,48 @@
+{
+  "name": "@fingerprintd/web",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Browser playground for the fingerprintd challenge/identify flow — runs the @fingerprintd/client SDK against a server and visualizes the result.",
+  "scripts": {
+    "dev": "nsl run --name \"fingerprintd-web\" -f vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "biome check",
+    "typecheck": "tsc --noEmit",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.6.0",
+    "@fingerprintd/client": "workspace:*",
+    "@fontsource-variable/inter": "^5.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "i18next": "^26.3.4",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "input-otp": "^1.4.2",
+    "lucide-react": "^1.23.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-i18next": "^17.0.8",
+    "shadcn": "^4.13.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/node": "catalog:",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "tailwindcss": "^4.3.2",
+    "typescript": "catalog:",
+    "vite": "^8.1.3",
+    "wrangler": "catalog:"
+  }
+}

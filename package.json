@@ -7,13 +7,15 @@
   "license": "UNLICENSED",
   "workspaces": {
     "packages": [
-      "clients/web",
-      "workers/edge"
+      "packages/*",
+      "apps/*"
     ],
     "catalog": {
+      "@biomejs/biome": "^2.5.2",
       "@types/node": "^26.1.0",
       "typescript": "^6.0.3",
-      "vitest": "^4.1.10"
+      "vitest": "^4.1.10",
+      "wrangler": "^4.107.0"
     }
   },
   "scripts": {
@@ -24,6 +26,6 @@
     "verify:edge": "bun scripts/verify-deploy.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.2"
+    "@biomejs/biome": "catalog:"
   }
 }

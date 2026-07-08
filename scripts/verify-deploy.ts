@@ -25,13 +25,22 @@
  * Exit code is 0 only when every executed check passes.
  */
 
-const BASE = (process.env.BASE ?? 'https://fingerprintd-edge.cdlab.workers.dev').replace(/\/$/, '')
+const BASE = (
+  process.env.BASE ?? 'https://fingerprintd-edge.cdlab.workers.dev'
+).replace(/\/$/, '')
 const PROBE_KEY = process.env.FP_PROBE_KEY ?? ''
 const SIGNING_KEY = process.env.FP_SIGNING_KEY ?? ''
-const TS_WINDOW = ['1', 'true', 'yes'].includes((process.env.FP_ENFORCE_TS_WINDOW ?? '').toLowerCase())
+const TS_WINDOW = ['1', 'true', 'yes'].includes(
+  (process.env.FP_ENFORCE_TS_WINDOW ?? '').toLowerCase(),
+)
 
 /** A stable stub of the `stable_components` object; content is arbitrary. */
-const COMPONENTS = { userAgent: 'UA', languages: 'en', timezone: 'UTC', platform: 'Linux' }
+const COMPONENTS = {
+  userAgent: 'UA',
+  languages: 'en',
+  timezone: 'UTC',
+  platform: 'Linux',
+}
 
 let passed = 0
 let failed = 0
@@ -50,9 +59,17 @@ function skip(name: string, why: string): void {
 
 /** hex(HMAC-SHA256(key, msg)) using Web Crypto. */
 async function hmacHex(keyBytes: Uint8Array, msg: Uint8Array): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
   const sig = await crypto.subtle.sign('HMAC', key, msg)
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return [...new Uint8Array(sig)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 /** Big-endian u64 prefix ++ body — the exact bytes the server signs (T9). */
@@ -87,7 +104,11 @@ async function identify(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
-  return { status: res.status, headers: res.headers, bytes: new Uint8Array(await res.arrayBuffer()) }
+  return {
+    status: res.status,
+    headers: res.headers,
+    bytes: new Uint8Array(await res.arrayBuffer()),
+  }
 }
 
 const enc = new TextEncoder()
@@ -107,19 +128,43 @@ async function main(): Promise<void> {
     collect?: { challenge?: { verify?: unknown } }
   }
   check('GET /challenge has nonce', typeof chal.nonce === 'string')
-  check('GET /challenge has expires_in', typeof chal.expires_in === 'number', `ttl=${chal.expires_in}s`)
+  check(
+    'GET /challenge has expires_in',
+    typeof chal.expires_in === 'number',
+    `ttl=${chal.expires_in}s`,
+  )
   const probeAdvertised = chal.collect?.challenge?.verify !== undefined
-  console.log(`  (info) probe enforcement ${probeAdvertised ? 'ON  (verify descriptor present)' : 'OFF'}`)
+  console.log(
+    `  (info) probe enforcement ${probeAdvertised ? 'ON  (verify descriptor present)' : 'OFF'}`,
+  )
 
   // --- T8 reject paths (no key needed) ------------------------------------
   console.log('\n== T8 reject paths ==')
   const rNoProbe = await identify({ nonce: await mintNonce() })
-  const rBadProbe = await identify({ nonce: await mintNonce(), probe: 'deadbeef' })
-  const rBadHex = await identify({ nonce: await mintNonce(), probe: 'a'.repeat(64) })
+  const rBadProbe = await identify({
+    nonce: await mintNonce(),
+    probe: 'deadbeef',
+  })
+  const rBadHex = await identify({
+    nonce: await mintNonce(),
+    probe: 'a'.repeat(64),
+  })
   if (probeAdvertised) {
-    check('missing probe -> 401', rNoProbe.status === 401, `got ${rNoProbe.status}`)
-    check('forged probe -> 401', rBadProbe.status === 401, `got ${rBadProbe.status}`)
-    check('forged 64-hex probe -> 401', rBadHex.status === 401, `got ${rBadHex.status}`)
+    check(
+      'missing probe -> 401',
+      rNoProbe.status === 401,
+      `got ${rNoProbe.status}`,
+    )
+    check(
+      'forged probe -> 401',
+      rBadProbe.status === 401,
+      `got ${rBadProbe.status}`,
+    )
+    check(
+      'forged 64-hex probe -> 401',
+      rBadHex.status === 401,
+      `got ${rBadHex.status}`,
+    )
   } else {
     skip('probe reject paths', 'probe enforcement OFF on this Worker')
   }
@@ -130,29 +175,51 @@ async function main(): Promise<void> {
   const replay = await identify({ nonce: replayNonce, probe: 'x' })
   check('replayed nonce -> 401', replay.status === 401, `got ${replay.status}`)
 
-  const badNonce = await identify({ nonce: '00000000-0000-0000-0000-000000000000', probe: 'x' })
-  check('unknown nonce -> 401', badNonce.status === 401, `got ${badNonce.status}`)
+  const badNonce = await identify({
+    nonce: '00000000-0000-0000-0000-000000000000',
+    probe: 'x',
+  })
+  check(
+    'unknown nonce -> 401',
+    badNonce.status === 401,
+    `got ${badNonce.status}`,
+  )
 
   const schemaBad = await fetch(`${BASE}/identify`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ nonce: 'x' }),
   })
-  check('schema violation -> 400', schemaBad.status === 400, `got ${schemaBad.status}`)
+  check(
+    'schema violation -> 400',
+    schemaBad.status === 400,
+    `got ${schemaBad.status}`,
+  )
 
   // --- T8 accept path (needs FP_PROBE_KEY) --------------------------------
   console.log('\n== T8 probe accept ==')
-  let accepted: { status: number; headers: Headers; bytes: Uint8Array } | null = null
+  let accepted: { status: number; headers: Headers; bytes: Uint8Array } | null =
+    null
   if (PROBE_KEY) {
     const nonce = await mintNonce()
     const probe = await hmacHex(enc.encode(PROBE_KEY), enc.encode(nonce))
     const patch: Partial<IdentifyBody> & { nonce: string } = { nonce, probe }
     if (TS_WINDOW) patch.ts = Date.now()
     accepted = await identify(patch)
-    check('correct probe -> 200', accepted.status === 200, `got ${accepted.status}`)
+    check(
+      'correct probe -> 200',
+      accepted.status === 200,
+      `got ${accepted.status}`,
+    )
     if (accepted.status === 200) {
-      const resp = JSON.parse(new TextDecoder().decode(accepted.bytes)) as { visitorId?: string }
-      check('body has visitorId', typeof resp.visitorId === 'string', `${resp.visitorId?.slice(0, 16)}…`)
+      const resp = JSON.parse(new TextDecoder().decode(accepted.bytes)) as {
+        visitorId?: string
+      }
+      check(
+        'body has visitorId',
+        typeof resp.visitorId === 'string',
+        `${resp.visitorId?.slice(0, 16)}…`,
+      )
     }
   } else {
     skip('correct probe -> 200', 'FP_PROBE_KEY not set')
@@ -167,14 +234,24 @@ async function main(): Promise<void> {
       check('x-fp-timestamp present', ts !== null, ts ?? '')
       check('x-fp-signature present', sig !== null)
       if (ts && sig) {
-        const expect = await hmacHex(enc.encode(SIGNING_KEY), signingMessage(ts, accepted.bytes))
-        check('signature == HMAC(signing_key, be(ts)++body)', timingSafeEqualHex(expect, sig))
+        const expect = await hmacHex(
+          enc.encode(SIGNING_KEY),
+          signingMessage(ts, accepted.bytes),
+        )
+        check(
+          'signature == HMAC(signing_key, be(ts)++body)',
+          timingSafeEqualHex(expect, sig),
+        )
       }
     } else if (ts || sig) {
-      console.log('  (info) signing headers present but FP_SIGNING_KEY unset — cannot verify value')
+      console.log(
+        '  (info) signing headers present but FP_SIGNING_KEY unset — cannot verify value',
+      )
       skip('signature verification', 'FP_SIGNING_KEY not set')
     } else {
-      console.log('  (info) no signing headers — response signing OFF on this Worker')
+      console.log(
+        '  (info) no signing headers — response signing OFF on this Worker',
+      )
     }
   } else {
     skip('signing checks', 'no 200 accept-path response (set FP_PROBE_KEY)')
@@ -189,7 +266,9 @@ async function main(): Promise<void> {
     check('stale ts -> 401', stale.status === 401, `got ${stale.status}`)
   }
 
-  console.log(`\n${failed === 0 ? 'OK' : 'FAILED'} — ${passed} passed, ${failed} failed, ${skipped} skipped`)
+  console.log(
+    `\n${failed === 0 ? 'OK' : 'FAILED'} — ${passed} passed, ${failed} failed, ${skipped} skipped`,
+  )
   process.exit(failed === 0 ? 0 : 1)
 }
 

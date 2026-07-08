@@ -1,0 +1,52 @@
+name: Deploy web (Cloudflare)
+
+# Manual trigger only — deploying is explicit; CI (ci.yml) never auto-deploys.
+# Publishes the apps/web SPA as a static-assets Worker to the same Cloudflare
+# account as the edge Worker.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions),
+# shared with deploy-edge.yml:
+#   CLOUDFLARE_API_TOKEN   deploy auth for wrangler (Workers Scripts:Edit)
+#   CLOUDFLARE_ACCOUNT_ID  deploy target account id
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Consumed by wrangler for every remote call.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Kept in sync with ci.yml's Bun setup.
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Bun workspace install from the repo root (one lockfile for all packages).
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The SPA consumes the built SDK — its dist/ is gitignored, so build it
+      # before the app so `@fingerprintd/client` resolves.
+      - name: Build SDK (@fingerprintd/client)
+        run: bun run --filter @fingerprintd/client build
+
+      - name: Build web
+        working-directory: apps/web
+        run: bun run build
+
+      - name: Deploy
+        working-directory: apps/web
+        run: bun run deploy

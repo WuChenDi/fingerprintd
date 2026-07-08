@@ -12,15 +12,15 @@ The server implements the full **P0–P3** feature set: one-time nonce
 `confidence`, fuzzy matching, passive signal collection, and server-side
 hardening (probe key, response signing, timestamp-window enforcement — the
 hardening controls are config-gated). Alongside it ships the **PC client shell**
-under `clients/web`: a TypeScript SDK integrating FingerprintJS/BotD, a
+under `packages/client`: a TypeScript SDK integrating FingerprintJS/BotD, a
 nonce-challenge collector, and a Rust/WASM probe core (`crates/fp-wasm`).
 
-A second **Cloudflare Workers** deployment target ships under `workers/edge`: a
+A second **Cloudflare Workers** deployment target ships under `apps/edge`: a
 TypeScript host (nonce Durable Object + D1 candidate index + routing) calling the
 same engine compiled to WASM (`crates/fp-wasm` → `crates/fp-core`), so a client
 works against **either** the Axum server or the edge Worker. The two stacks are
 parity-verified against a shared fixture — see
-[`workers/edge/README.md`](workers/edge/README.md).
+[`apps/edge/README.md`](apps/edge/README.md).
 
 | Endpoint     | Method | Purpose                                          |
 | ------------ | ------ | ------------------------------------------------ |
@@ -32,15 +32,15 @@ Verified test counts:
 
 - **Rust workspace: 96** — `cargo nextest run --all-features` (46 in `fp-core`,
   40 in `fingerprintd` incl. cross-stack parity, 10 in `fp-wasm`)
-- **Client: 34** — `vitest` (in `clients/web`)
-- **Edge Worker: 27** — `cd workers/edge && bun run test` (router + state +
+- **Client: 34** — `vitest` (in `packages/client`)
+- **Edge Worker: 27** — `cd apps/edge && bun run test` (router + state +
   cross-stack parity in miniflare)
 
 **Environment limits:** the client tests run without a headless browser (jsdom +
 mocked `fetch`, canvas, and audio backends only); the edge Worker runs
 local-only (miniflare, no Cloudflare account). Real in-browser certification and
-a real Cloudflare deploy are deferred to a human — see `clients/web/README.md`
-and `workers/edge/README.md`.
+a real Cloudflare deploy are deferred to a human — see `packages/client/README.md`
+and `apps/edge/README.md`.
 
 ## Project structure
 
@@ -50,10 +50,11 @@ crates/
   fp-core/                       # framework-free compute + storage traits (shared)
   fingerprintd/                  # Axum server (challenge / identify / matching)
   fp-wasm/                       # Rust/WASM probe core + edge FpEngine
-clients/
-  web/                           # TypeScript SDK (FingerprintJS/BotD + collector)
-workers/
+packages/
+  client/                        # TypeScript SDK (FingerprintJS/BotD + collector)
+apps/
   edge/                          # Cloudflare Worker (TS host + WASM engine + DO/D1)
+  web/                           # React/Vite playground for the challenge/identify flow
 docs/
   prd.md                         # product spec
   design-fuzzy-matching.md       # fuzzy-matching design

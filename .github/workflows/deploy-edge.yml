@@ -18,7 +18,7 @@ name: Deploy edge (Cloudflare)
 #                    committed dev build. NOTE: the Worker verifies probes with the
 #                    RUNTIME key (FpEngine), so this compile-time bake buys supply-
 #                    chain reproducibility, not probe behavior — browser-client
-#                    parity still needs clients/web/wasm rebuilt with the SAME key
+#                    parity still needs packages/client/wasm rebuilt with the SAME key
 #                    when that front-end deploy lands.
 #   FP_SIGNING_KEY   enables response signing (T9).
 
@@ -61,7 +61,7 @@ jobs:
       # baked in at compile time (crates/fp-wasm `option_env!`); unset ⇒ the dev
       # placeholder. This is supply-chain reproducibility only: /identify still
       # verifies probes with the RUNTIME key, and browser-client parity is a
-      # clients/web concern (rebuild clients/web/wasm with the same key later).
+      # packages/client concern (rebuild packages/client/wasm with the same key later).
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -75,27 +75,27 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Rebuild vendored WASM (crates/fp-wasm -> workers/edge/wasm)
+      - name: Rebuild vendored WASM (crates/fp-wasm -> apps/edge/wasm)
         env:
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
-        run: wasm-pack build --target web --out-dir workers/edge/wasm crates/fp-wasm
+        run: wasm-pack build --target web --out-dir apps/edge/wasm crates/fp-wasm
 
-      # Optional: apply the drizzle-kit migrations in workers/edge/src/database to
+      # Optional: apply the drizzle-kit migrations in apps/edge/src/database to
       # the remote D1 bound in wrangler.jsonc before the code goes live.
       - name: Apply D1 migrations (remote)
         if: ${{ inputs.run_migrations }}
-        working-directory: workers/edge
+        working-directory: apps/edge
         run: bun run cf:remotedb
 
       - name: Deploy
-        working-directory: workers/edge
+        working-directory: apps/edge
         run: bun run deploy
 
       # Sync Worker runtime secrets from GitHub secrets (idempotent). Runs AFTER
       # deploy so the Worker exists; empty GitHub secrets are skipped so an unset
       # value never wipes an existing Worker secret.
       - name: Sync Worker secrets
-        working-directory: workers/edge
+        working-directory: apps/edge
         env:
           FP_SALT_SECRET: ${{ secrets.FP_SALT_SECRET }}
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
