@@ -52,7 +52,14 @@ export class NonceDurableObject {
     const expiresAt = Date.now() + ttlSecs * 1000
     await this.state.storage.put<NonceRecord>(RECORD_KEY, { expiresAt })
     // Reclaim an un-consumed nonce at expiry so per-nonce storage does not leak.
-    await this.state.storage.setAlarm(expiresAt)
+    // Only schedule the alarm when the nonce actually lives into the future: an
+    // already-expired (ttl<=0) nonce needs no reclaim — consume() reports it
+    // `expired` and removes it. Setting an alarm at a non-future `expiresAt`
+    // would fire immediately and race consume(), deleting the record first so
+    // the legitimate consume reads `unknown` instead of `expired`.
+    if (ttlSecs > 0) {
+      await this.state.storage.setAlarm(expiresAt)
+    }
     return new Response(null, { status: 204 })
   }
 
