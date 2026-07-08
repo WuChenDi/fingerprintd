@@ -85,3 +85,31 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  web-app:
+    name: web-app (apps/web: biome + typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # apps/web consumes the built SDK — build it first (dist is gitignored).
+      - name: Build SDK (@fingerprintd/client)
+        run: bun run --filter @fingerprintd/client build
+
+      - name: Biome check
+        working-directory: apps/web
+        run: bunx @biomejs/biome check .
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: bun run typecheck
+
+      - name: Build
+        working-directory: apps/web
+        run: bun run build
