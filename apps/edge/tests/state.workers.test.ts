@@ -62,6 +62,23 @@ describe('nonce Durable Object (atomic burn)', () => {
     // Expired nonces are still removed, so a retry is unknown, not re-expired.
     expect(await store.consume(nonce)).toBe('unknown')
   })
+
+  it('fails closed to unknown when the DO returns a non-ok response', async () => {
+    // A DO 5xx returns an error string, not a NonceOutcome. Coercing it would
+    // let a garbage value masquerade as a decision; consume() must instead fail
+    // closed so /identify still rejects with 401. Stub a namespace whose stub
+    // fetch resolves to a 500 with an error body.
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: () => ({
+        fetch: () =>
+          Promise.resolve(new Response('internal error', { status: 500 })),
+      }),
+    } as unknown as DurableObjectNamespace
+    const store = new DurableNonceStore(namespace, 30)
+    expect(await store.consume('any-nonce')).not.toBe('valid')
+    expect(await store.consume('any-nonce')).toBe('unknown')
+  })
 })
 
 describe('D1 fingerprint store (recall + drift)', () => {

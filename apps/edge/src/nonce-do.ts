@@ -121,6 +121,12 @@ export class DurableNonceStore implements NonceStore {
     const response = await this.stub(nonce).fetch('https://nonce/consume', {
       method: 'POST',
     })
+    // Mirror `issue`'s guard: a non-ok (DO 5xx) body is an error string, not a
+    // NonceOutcome. Coercing it would let a garbage value flow downstream; fail
+    // closed to `unknown` so /identify still rejects with 401.
+    if (!response.ok) {
+      return 'unknown'
+    }
     return (await response.text()) as NonceOutcome
   }
 
