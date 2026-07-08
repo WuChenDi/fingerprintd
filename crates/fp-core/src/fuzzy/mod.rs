@@ -32,9 +32,13 @@ pub mod record;
 
 pub use blocking::CandidateSource;
 pub use engine::{Decision, MatchOutcome};
+pub use frequency::FrequencyStore;
 pub use record::FingerprintStore;
 
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -88,20 +92,35 @@ impl Default for EvictionPolicy {
     }
 }
 
-/// Aggregate in-memory store tying the record library, blocking indexes, and
-/// frequency table together behind one observe/candidates surface.
-#[derive(Debug)]
+/// Aggregate store tying the record library, blocking indexes, and frequency
+/// table together behind one observe/candidates surface.
+///
+/// The three storage backends are held as trait objects so each is injectable
+/// (see [`FuzzyStore::from_backends`]); the in-memory implementations remain the
+/// default and only shipped backend. The salt and `MinHash`-`LSH` family stay
+/// concrete: they are deterministic key-derivation, not swappable storage.
 pub struct FuzzyStore {
     /// Per-instance salt applied to every stored value.
     salt: Salt,
     /// The `visitorId → template` fingerprint library (§3).
-    records: RecordStore,
+    records: Box<dyn FingerprintStore>,
     /// The `key → set<visitorId>` blocking inverted index (§4).
-    blocking: BlockingIndex,
+    blocking: Box<dyn CandidateSource>,
     /// `MinHash`-`LSH` band-key generator for set components (§4 K3).
     minhash: MinHashLsh,
     /// Per-value frequency material for `u_i` estimation (§9).
-    frequency: FrequencyTable,
+    frequency: Box<dyn FrequencyStore>,
+}
+
+impl fmt::Debug for FuzzyStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The backends are trait objects (not `Debug`); expose the concrete,
+        // deterministic key-derivation state and elide the storage internals.
+        f.debug_struct("FuzzyStore")
+            .field("salt", &self.salt)
+            .field("minhash", &self.minhash)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(feature = "rng")]
@@ -130,10 +149,13 @@ impl FuzzyStore {
     pub fn new_with_policy(policy: EvictionPolicy) -> Self {
         Self {
             salt: Salt::random(),
-            records: RecordStore::with_capacity(policy.max_records, policy.record_ttl_ms),
-            blocking: BlockingIndex::with_max_block(policy.max_block),
+            records: Box::new(RecordStore::with_capacity(
+                policy.max_records,
+                policy.record_ttl_ms,
+            )),
+            blocking: Box::new(BlockingIndex::with_max_block(policy.max_block)),
             minhash: MinHashLsh::new(),
-            frequency: FrequencyTable::with_capacity(policy.max_frequency_values),
+            frequency: Box::new(FrequencyTable::with_capacity(policy.max_frequency_values)),
         }
     }
 
@@ -147,10 +169,35 @@ impl FuzzyStore {
     pub fn deterministic(secret: &[u8]) -> Self {
         Self {
             salt: Salt::from_secret(secret),
-            records: RecordStore::new(),
-            blocking: BlockingIndex::new(),
+            records: Box::new(RecordStore::new()),
+            blocking: Box::new(BlockingIndex::new()),
             minhash: MinHashLsh::from_seed(secret),
-            frequency: FrequencyTable::new(),
+            frequency: Box::new(FrequencyTable::new()),
+        }
+    }
+
+    /// Assemble a store from explicitly supplied backends — the injection seam.
+    ///
+    /// [`FuzzyStore::new`] and [`FuzzyStore::deterministic`] wire the in-memory
+    /// defaults ([`RecordStore`], [`BlockingIndex`], [`FrequencyTable`]), which
+    /// remain the only shipped backend. This constructor lets a caller swap any
+    /// of the three storage backends for an alternate implementation of
+    /// [`FingerprintStore`] / [`CandidateSource`] / [`FrequencyStore`] (an
+    /// externalized index, a test double) while keeping the same salt and
+    /// `MinHash` family so key derivation is unchanged.
+    pub fn from_backends(
+        salt: Salt,
+        minhash: MinHashLsh,
+        records: Box<dyn FingerprintStore>,
+        blocking: Box<dyn CandidateSource>,
+        frequency: Box<dyn FrequencyStore>,
+    ) -> Self {
+        Self {
+            salt,
+            records,
+            blocking,
+            minhash,
+            frequency,
         }
     }
 
@@ -220,13 +267,13 @@ impl FuzzyStore {
     }
 
     /// Frequency material, for `u_i` estimation by the (future) scorer.
-    pub fn frequency(&self) -> &FrequencyTable {
-        &self.frequency
+    pub fn frequency(&self) -> &dyn FrequencyStore {
+        self.frequency.as_ref()
     }
 
     /// The blocking index (exposes drop accounting and direct queries).
-    pub fn blocking(&self) -> &BlockingIndex {
-        &self.blocking
+    pub fn blocking(&self) -> &dyn CandidateSource {
+        self.blocking.as_ref()
     }
 
     /// Convert one raw component value to its stored form per the schema.
@@ -510,5 +557,69 @@ mod tests {
         let store = FuzzyStore::new();
         assert!(store.observe("v1", &json!("not-an-object"), 1_000));
         assert!(store.record("v1").unwrap().components.is_empty());
+    }
+
+    /// A test-only [`FingerprintStore`] that counts writes while delegating the
+    /// actual storage to an inner in-memory [`RecordStore`]. It exists to prove
+    /// [`FuzzyStore::from_backends`] injects the record backend the engine then
+    /// writes through.
+    #[derive(Debug)]
+    struct CountingRecordStore {
+        inner: super::record::RecordStore,
+        observes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl super::FingerprintStore for CountingRecordStore {
+        fn observe(
+            &self,
+            visitor: &str,
+            components: std::collections::BTreeMap<String, super::component::Stored>,
+            now_ms: u64,
+        ) -> bool {
+            self.observes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.observe(visitor, components, now_ms)
+        }
+
+        fn get(&self, visitor: &str) -> Option<super::record::FingerprintRecord> {
+            self.inner.get(visitor)
+        }
+    }
+
+    /// The seam works: a non-default record backend injected via
+    /// [`FuzzyStore::from_backends`] is the one every write goes through, while
+    /// matching still recalls and identifies correctly against it.
+    #[test]
+    fn injected_record_backend_is_actually_used() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+
+        let observes = Arc::new(AtomicU64::new(0));
+        let store = FuzzyStore::from_backends(
+            super::Salt::from_secret(b"seam-test"),
+            super::MinHashLsh::from_seed(b"seam-test"),
+            Box::new(CountingRecordStore {
+                inner: super::record::RecordStore::new(),
+                observes: Arc::clone(&observes),
+            }),
+            Box::new(super::BlockingIndex::new()),
+            Box::new(super::FrequencyTable::new()),
+        );
+
+        // A direct observation writes through the swapped backend...
+        assert!(store.observe("v1", &full_probe(), 1_000));
+        assert_eq!(observes.load(Ordering::Relaxed), 1);
+        // ...and the record it stored is recalled and readable through the seam.
+        assert!(store.candidates(&full_probe()).contains("v1"));
+        assert_eq!(store.record("v1").unwrap().observation_count, 1);
+
+        // identify() persists a confirmed match by folding it back in, so the
+        // injected backend's write path is exercised end to end.
+        let matched = store.identify(&full_probe(), 2_000);
+        assert_eq!(matched.decision, super::Decision::Match);
+        assert_eq!(matched.visitor_id, "v1");
+        assert_eq!(observes.load(Ordering::Relaxed), 2);
     }
 }

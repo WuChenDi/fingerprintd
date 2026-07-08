@@ -14,6 +14,25 @@ use std::{
 
 use super::component::Hash32;
 
+/// Storage contract for the per-value frequency material behind `u_i` estimation
+/// (design §9/§11).
+///
+/// The in-memory [`FrequencyTable`] is the single-instance implementation. An
+/// externalized backend (a shared counter store, a later step) lives behind the
+/// same contract, so the engine records sightings and reads counts without
+/// knowing where the frequency material is kept. Only the raw counting surface
+/// is exposed here; the smoothed `u_i` estimate lives in the scorer.
+pub trait FrequencyStore: Send + Sync {
+    /// Record one sighting of `value`.
+    fn record(&self, value: Hash32);
+
+    /// Sightings recorded for `value`.
+    fn count(&self, value: Hash32) -> u64;
+
+    /// Total scalar values recorded (the frequency denominator).
+    fn total(&self) -> u64;
+}
+
 /// `value hash → count`, with a running total, for `u_i` estimation (design §9).
 ///
 /// Updated incrementally as fingerprints are observed. The counter maps a
@@ -117,6 +136,20 @@ impl FrequencyTable {
     /// Lock the counter, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, Counts> {
         self.counts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl FrequencyStore for FrequencyTable {
+    fn record(&self, value: Hash32) {
+        FrequencyTable::record(self, value);
+    }
+
+    fn count(&self, value: Hash32) -> u64 {
+        FrequencyTable::count(self, value)
+    }
+
+    fn total(&self) -> u64 {
+        FrequencyTable::total(self)
     }
 }
 
