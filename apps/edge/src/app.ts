@@ -19,6 +19,7 @@
 
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import * as z from 'zod'
 import type { EdgeConfig } from './config'
 import type { EdgeEngine } from './engine'
@@ -65,6 +66,24 @@ const identifySchema = z.object({
 /** Build the edge Hono app over the injected {@link Deps}. */
 export function createApp(deps: Deps): Hono {
   const app = new Hono()
+
+  // Browser CORS for the playground. Off unless origins are configured
+  // (`FP_CORS_ORIGINS`); when on, expose the T9 signature headers so the browser
+  // client can read them, and let the middleware answer preflight `OPTIONS`.
+  const { corsOrigins } = deps.config
+  if (corsOrigins.length > 0) {
+    const allowAny = corsOrigins.includes('*')
+    app.use(
+      '*',
+      cors({
+        origin: allowAny ? '*' : corsOrigins,
+        allowMethods: ['GET', 'POST', 'OPTIONS'],
+        allowHeaders: ['Content-Type'],
+        exposeHeaders: [SIGNATURE_TIMESTAMP_HEADER, SIGNATURE_HEADER],
+        maxAge: 86400,
+      }),
+    )
+  }
 
   app.get('/health', (c) => c.body(null, 200))
 

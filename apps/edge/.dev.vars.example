@@ -22,3 +22,7 @@ FP_SALT_SECRET = "local-dev-salt-change-me"
 # Response-signing key (T9). Set to sign /identify bodies (x-fp-signature +
 # x-fp-timestamp); leave unset/empty to leave responses unsigned.
 # FP_SIGNING_KEY = "local-dev-signing-key"
+
+# Allowed browser CORS origins (comma-separated; `*` = any). Set to the web
+# playground's dev origin to call /challenge and /identify cross-origin from it.
+# FP_CORS_ORIGINS = "http://fingerprintd-web.localhost:3355"

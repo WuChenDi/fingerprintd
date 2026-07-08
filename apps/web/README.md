@@ -66,6 +66,10 @@ same — install → build SDK → build web → `wrangler deploy`. It reuses th
 
 - **Cross-origin.** The playground fetches `/challenge` and `/identify` on the
   server origin you enter, so that server must allow this app's origin via CORS.
+  The edge Worker does this via `FP_CORS_ORIGINS` (see
+  [`apps/edge/README.md`](../edge/README.md)); it also exposes the T9 signature
+  headers so the client can verify them. Point at another server and it must set
+  its own CORS.
 - **Probe key parity.** The vendored WASM ships a **dev** probe key
   (`test-probe-secret`). Against a deployment configured with a different
   `FP_PROBE_KEY`, the probe will not match and a probe-enforcing server returns
