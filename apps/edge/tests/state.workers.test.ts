@@ -1,6 +1,9 @@
 import { env, SELF } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { D1FingerprintStore } from '../src/fingerprint-store-d1'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  D1FingerprintStore,
+  DEFAULT_MAX_BLOCK,
+} from '../src/fingerprint-store-d1'
 import { DurableNonceStore } from '../src/nonce-do'
 import type { ScoreOutcome } from '../src/types'
 
@@ -58,6 +61,23 @@ describe('nonce Durable Object (atomic burn)', () => {
     expect(await store.consume(nonce)).toBe('expired')
     // Expired nonces are still removed, so a retry is unknown, not re-expired.
     expect(await store.consume(nonce)).toBe('unknown')
+  })
+
+  it('fails closed to unknown when the DO returns a non-ok response', async () => {
+    // A DO 5xx returns an error string, not a NonceOutcome. Coercing it would
+    // let a garbage value masquerade as a decision; consume() must instead fail
+    // closed so /identify still rejects with 401. Stub a namespace whose stub
+    // fetch resolves to a 500 with an error body.
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: () => ({
+        fetch: () =>
+          Promise.resolve(new Response('internal error', { status: 500 })),
+      }),
+    } as unknown as DurableObjectNamespace
+    const store = new DurableNonceStore(namespace, 30)
+    expect(await store.consume('any-nonce')).not.toBe('valid')
+    expect(await store.consume('any-nonce')).toBe('unknown')
   })
 })
 
@@ -124,6 +144,49 @@ describe('D1 fingerprint store (recall + drift)', () => {
       1000,
     )
     expect(await store.recall(['k9'])).toEqual([])
+  })
+
+  it('caps a hot block at maxBlock and warns on truncation', async () => {
+    // Shipped default stays 1024; the cap is injected small here so we can seed
+    // over-capacity without writing 1024+ rows. Five visitors all index under one
+    // hot key; a cap of three must truncate the recall to three and surface it.
+    expect(DEFAULT_MAX_BLOCK).toBe(1024)
+    const store = new D1FingerprintStore(env.DB, 3)
+    for (let i = 0; i < 5; i++) {
+      await store.persist(
+        outcome('new_device', `hot-${i}`),
+        { platform: 'Linux', idx: i },
+        ['hot'],
+        1000 + i,
+      )
+    }
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const recalled = await store.recall(['hot'])
+      expect(recalled).toHaveLength(3)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not warn when a block is under the cap', async () => {
+    const store = new D1FingerprintStore(env.DB, 3)
+    await store.persist(
+      outcome('new_device', 'v1'),
+      { platform: 'Linux' },
+      ['cool'],
+      1000,
+    )
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await store.recall(['cool'])).toHaveLength(1)
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

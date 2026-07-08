@@ -174,6 +174,44 @@ export class FpEngine {
 if (Symbol.dispose) FpEngine.prototype[Symbol.dispose] = FpEngine.prototype.free;
 
 /**
+ * Passive-signals verdict for one request, computed exactly as the native
+ * server ([`fp_core::signals::compute`]) does — so the edge Worker reaches the
+ * SAME UA↔TLS / IP-risk verdict.
+ *
+ * Needs no secrets (unlike [`FpEngine`]), so it is a free `#[wasm_bindgen]`
+ * function. Constructs the dependency-free [`StaticIpIntel`] classifier, cross-
+ * checks the trusted JA4 stack against the claimed UA, and returns JSON:
+ * `{"ua_tls_consistent": <bool>, "ip_risk": "<low|medium|high>",
+ * "confidence_adjustment": <f64>}`. A missing/unparseable JA4 auto-degrades
+ * (neutral); a missing/unparseable IP defaults to `"low"` (§4.2).
+ *
+ * The owned `Option<String>` parameters are the wasm-bindgen boundary shape (JS
+ * strings arrive owned); the body only borrows them, hence the local allow.
+ * @param {string | null} [ja4]
+ * @param {string | null} [client_ip]
+ * @param {string | null} [claimed_ua]
+ * @returns {string}
+ */
+export function passive_signals(ja4, client_ip, claimed_ua) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        var ptr0 = isLikeNone(ja4) ? 0 : passStringToWasm0(ja4, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(client_ip) ? 0 : passStringToWasm0(client_ip, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(claimed_ua) ? 0 : passStringToWasm0(claimed_ua, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.passive_signals(ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Compute the probe for `nonce` using the embedded [`PROBE_KEY`].
  *
  * This is the WASM export a browser collector calls: it returns the hex probe
@@ -236,6 +274,10 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
 }
 
 function passArray8ToWasm0(arg, malloc) {

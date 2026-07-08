@@ -28,8 +28,8 @@ import type { CandidateSource, NonceStore } from './state'
 import type {
   ChallengeResponse,
   IdentifyResponse,
+  PassiveVerdict,
   ProbeDescriptor,
-  Signals,
 } from './types'
 
 /** Everything the routes need, injected so tests supply fakes. */
@@ -50,6 +50,15 @@ const PROBE_DESCRIPTOR: ProbeDescriptor = {
   input: 'nonce',
   encoding: 'hex',
 }
+
+/** Trusted edge headers carrying the passive signals, injected by Cloudflare —
+ *  the SAME names the native adapter reads (`crates/fingerprintd/src/signals.rs`).
+ *  Trusted only behind a trusted edge; a client-supplied copy is never trusted. */
+const JA4_HEADER = 'cf-bot-management-ja4'
+const CF_CONNECTING_IP = 'cf-connecting-ip'
+/** Client-reported UA key spellings, in native precedence order
+ *  (`crates/fingerprintd/src/lib.rs` `claimed_ua`). First string value wins. */
+const CLAIMED_UA_KEYS = ['userAgent', 'user_agent', 'ua']
 
 /**
  * `POST /identify` request body (PRD §5). `stable_components` is an arbitrary
@@ -142,17 +151,23 @@ export function createApp(deps: Deps): Hono {
     const outcome = deps.engine.score(components, candidates)
     await deps.candidates.persist(outcome, components, blockingKeys, now)
 
-    // The engine returns the pure match verdict; the passive-signal summary is a
-    // host concern. The JA4/IP fusion (`crates/fingerprintd/src/signals.rs`) is
-    // HeaderMap-coupled and not in the WASM compute, so this emits the server's
-    // neutral "degraded" default (no Bot Management headers).
+    // Cross-check the client-reported UA against the unforgeable edge-observed
+    // TLS stack / IP and fuse the passive adjustment into confidence, exactly as
+    // native (`crates/fingerprintd/src/lib.rs`). The verdict comes from the shared
+    // WASM compute; the host only wires the trusted inputs and clamps.
+    const verdict = edgeSignals(c.req.raw, components, deps)
+    const confidence = clamp(outcome.confidence + verdict.confidence_adjustment)
+
     const response: IdentifyResponse = {
       visitorId: outcome.visitor_id,
-      confidence: outcome.confidence,
+      confidence,
       is_new_device: outcome.is_new_device,
       decision: outcome.decision,
       collision_risk: outcome.collision_risk,
-      signals: neutralSignals(),
+      signals: {
+        ua_tls_consistent: verdict.ua_tls_consistent,
+        ip_risk: verdict.ip_risk,
+      },
     }
 
     return signedJson(response, deps.config, deps.engine, now)
@@ -166,10 +181,50 @@ function inWindow(clientTs: number, now: number, skewMs: number): boolean {
   return Math.abs(now - clientTs) <= skewMs
 }
 
-/** The neutral passive-signal summary emitted when connection signals are
- *  absent — matches the native server's graceful-degrade default (§4.2). */
-function neutralSignals(): Signals {
-  return { ua_tls_consistent: true, ip_risk: 'low' }
+/**
+ * Compute the passive-signal verdict for a request via the shared WASM compute.
+ *
+ * The trust boundary (PRD §4.2): edge-injected JA4/IP are read ONLY behind a
+ * trusted edge. When `trustEdgeHeaders` is off we pass `undefined` for all three
+ * inputs — an untrusted origin ignores any client-supplied copy — so the WASM
+ * returns the degraded neutral verdict (`ua_tls_consistent: true`, `ip_risk:
+ * "low"`, adjustment `0`). Fail-closed. Absent JA4 behind a trusted edge degrades
+ * the same way, mirroring native (`crates/fingerprintd/src/lib.rs`).
+ */
+function edgeSignals(
+  raw: Request,
+  components: Record<string, unknown>,
+  deps: Deps,
+): PassiveVerdict {
+  if (!deps.config.trustEdgeHeaders) {
+    return deps.engine.passiveSignals(undefined, undefined, undefined)
+  }
+  const ja4 = (raw.headers.get(JA4_HEADER) ?? cfJa4(raw))?.trim() || undefined
+  const clientIp = raw.headers.get(CF_CONNECTING_IP)?.trim() || undefined
+  return deps.engine.passiveSignals(ja4, clientIp, claimedUa(components))
+}
+
+/** The Cloudflare-computed JA4 fallback from `request.cf.botManagement` when the
+ *  header is absent. The property is not in the base workers-types, so read it
+ *  defensively. */
+function cfJa4(raw: Request): string | undefined {
+  const cf = (raw as { cf?: { botManagement?: { ja4?: string } } }).cf
+  return cf?.botManagement?.ja4
+}
+
+/** The client-reported UA under suspicion, taken from the body's stable
+ *  components by native key precedence — the value the TLS stack cross-checks. */
+function claimedUa(components: Record<string, unknown>): string | undefined {
+  for (const key of CLAIMED_UA_KEYS) {
+    const value = components[key]
+    if (typeof value === 'string') return value
+  }
+  return undefined
+}
+
+/** Clamp a fused confidence into `[0, 1]` (design §6). */
+function clamp(value: number): number {
+  return Math.min(1, Math.max(0, value))
 }
 
 /** A `200 application/json` response over a stable serialization. */

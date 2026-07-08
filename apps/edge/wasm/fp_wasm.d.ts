@@ -69,6 +69,23 @@ export class FpEngine {
 }
 
 /**
+ * Passive-signals verdict for one request, computed exactly as the native
+ * server ([`fp_core::signals::compute`]) does — so the edge Worker reaches the
+ * SAME UA↔TLS / IP-risk verdict.
+ *
+ * Needs no secrets (unlike [`FpEngine`]), so it is a free `#[wasm_bindgen]`
+ * function. Constructs the dependency-free [`StaticIpIntel`] classifier, cross-
+ * checks the trusted JA4 stack against the claimed UA, and returns JSON:
+ * `{"ua_tls_consistent": <bool>, "ip_risk": "<low|medium|high>",
+ * "confidence_adjustment": <f64>}`. A missing/unparseable JA4 auto-degrades
+ * (neutral); a missing/unparseable IP defaults to `"low"` (§4.2).
+ *
+ * The owned `Option<String>` parameters are the wasm-bindgen boundary shape (JS
+ * strings arrive owned); the body only borrows them, hence the local allow.
+ */
+export function passive_signals(ja4?: string | null, client_ip?: string | null, claimed_ua?: string | null): string;
+
+/**
  * Compute the probe for `nonce` using the embedded [`PROBE_KEY`].
  *
  * This is the WASM export a browser collector calls: it returns the hex probe
@@ -88,6 +105,7 @@ export interface InitOutput {
     readonly fpengine_score: (a: number, b: number, c: number) => [number, number, number, number];
     readonly fpengine_sign: (a: number, b: bigint, c: number, d: number) => [number, number];
     readonly fpengine_verify_probe: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly passive_signals: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly probe: (a: number, b: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

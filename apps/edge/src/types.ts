@@ -81,6 +81,20 @@ export interface Signals {
   ip_risk: string
 }
 
+/**
+ * Passive-signal verdict returned by the shared WASM `passive_signals` export
+ * (`fp_core::signals`). The host maps the boolean + band into {@link Signals} and
+ * fuses `confidence_adjustment` into `/identify` confidence — never the visitorId.
+ */
+export interface PassiveVerdict {
+  /** Whether the UA claim and the edge-observed TLS stack agree (false ⇒ forgery). */
+  ua_tls_consistent: boolean
+  /** Coarse IP risk band, `low` / `medium` / `high`. */
+  ip_risk: string
+  /** Signed confidence delta: positive boost, negative downgrade, `0` degraded. */
+  confidence_adjustment: number
+}
+
 /** `POST /identify` success body (PRD §5). */
 export interface IdentifyResponse {
   /** Stable device identifier (server-computed; serde-renamed from visitor_id). */

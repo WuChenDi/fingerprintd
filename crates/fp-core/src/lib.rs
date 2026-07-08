@@ -29,4 +29,5 @@ pub mod fuzzy;
 #[cfg(feature = "rng")]
 pub mod nonce;
 pub mod probe;
+pub mod signals;
 pub mod signing;

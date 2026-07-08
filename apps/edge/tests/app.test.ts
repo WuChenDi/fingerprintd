@@ -265,6 +265,120 @@ describe('timestamp window (T9)', () => {
   })
 })
 
+describe('passive signals (edge JA4/IP fusion, M2)', () => {
+  // Shared JA4/UA vectors, identical to the native `signals` tests
+  // (crates/fingerprintd/src/signals.rs) so the edge verdict is provably the same.
+  /** A JA4 whose structural counts read as a real browser (15 ciphers, 16 ext). */
+  const BROWSER_JA4 = 't13d1516h2_8daaf6152771_02713d6af862'
+  /** A JA4 whose counts read as a minimal automation stack (3/4). */
+  const AUTOMATION_JA4 = 't13d0304h1_aaaaaaaaaaaa_bbbbbbbbbbbb'
+
+  const postIdentifyWith = (body: unknown, headers: Record<string, string>) =>
+    new Request('https://edge.test/identify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+
+  /** Run a full challenge→identify and return the parsed body. `probeComponents`
+   *  reports a Chrome UA (`user_agent`), so a browser JA4 is consistent and an
+   *  automation JA4 is the forgery. The candidate source is empty ⇒ the base
+   *  score is identical across calls, so confidences are comparable. */
+  async function identifyWith(
+    deps: Deps,
+    headers: Record<string, string>,
+  ): Promise<IdentifyResponse> {
+    const { nonce } = await challenge(deps)
+    const resp = await handleRequest(
+      postIdentifyWith(
+        { nonce, stable_components: probeComponents() },
+        headers,
+      ),
+      deps,
+    )
+    expect(resp.status).toBe(200)
+    return (await resp.json()) as IdentifyResponse
+  }
+
+  const trustedDeps = () => makeDeps({ FP_TRUST_EDGE_HEADERS: '1' })
+
+  it('trusted browser JA4 over a Chrome UA is consistent and boosts confidence', async () => {
+    const deps = trustedDeps()
+    // Degraded baseline: trusted edge, but no Bot Management header present.
+    const degraded = await identifyWith(deps, {})
+    expect(degraded.signals).toEqual({
+      ua_tls_consistent: true,
+      ip_risk: 'low',
+    })
+
+    const consistent = await identifyWith(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+    })
+    expect(consistent.signals.ua_tls_consistent).toBe(true)
+    // The consistency boost (design §6) lifts confidence above the degraded base.
+    expect(consistent.confidence).toBeGreaterThan(degraded.confidence)
+  })
+
+  it('trusted automation JA4 under a Chrome UA is a forgery: inconsistent + downgraded', async () => {
+    const deps = trustedDeps()
+    const degraded = await identifyWith(deps, {})
+    const forgery = await identifyWith(deps, {
+      'cf-bot-management-ja4': AUTOMATION_JA4,
+    })
+    // The anti-forgery core (PRD §4.2): Chrome UA riding an automation TLS stack.
+    expect(forgery.signals.ua_tls_consistent).toBe(false)
+    expect(forgery.confidence).toBeLessThan(degraded.confidence)
+  })
+
+  it('cf-connecting-ip drives the ip_risk band (datacenter high / residential low)', async () => {
+    const deps = trustedDeps()
+    const datacenter = await identifyWith(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '34.120.5.6',
+    })
+    expect(datacenter.signals.ip_risk).toBe('high')
+
+    const residential = await identifyWith(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    expect(residential.signals.ip_risk).toBe('low')
+
+    // No IP header at all ⇒ low (no adverse evidence).
+    const absent = await identifyWith(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+    })
+    expect(absent.signals.ip_risk).toBe('low')
+  })
+
+  it('trusted edge with JA4 absent auto-degrades: consistent, low, no penalty', async () => {
+    const deps = trustedDeps()
+    const baseline = await identifyWith(deps, {})
+    // IP present but Bot Management absent ⇒ degraded (neutral), IP still classified.
+    const degraded = await identifyWith(deps, {
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    expect(degraded.signals.ua_tls_consistent).toBe(true)
+    expect(degraded.signals.ip_risk).toBe('low')
+    // A missing connection signal never penalises (§4.2 auto-degrade).
+    expect(degraded.confidence).toBeCloseTo(baseline.confidence, 12)
+  })
+
+  it('untrusted edge ignores a forged client-supplied JA4/IP copy', async () => {
+    // trustEdgeHeaders defaults OFF: a request-supplied automation JA4 +
+    // datacenter IP must NOT be trusted — the untrusted path auto-degrades.
+    const deps = makeDeps()
+    const baseline = await identifyWith(deps, {})
+    const forged = await identifyWith(deps, {
+      'cf-bot-management-ja4': AUTOMATION_JA4,
+      'cf-connecting-ip': '34.120.5.6',
+    })
+    expect(forged.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
+    // The forged copy neither downgrades confidence nor raises the IP band.
+    expect(forged.confidence).toBeCloseTo(baseline.confidence, 12)
+  })
+})
+
 describe('CORS (browser playground)', () => {
   const ORIGIN = 'https://app.test'
   const corsDeps = () =>
