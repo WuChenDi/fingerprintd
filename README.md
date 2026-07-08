@@ -79,6 +79,21 @@ Layered (increasing priority): built-in defaults → `fingerprintd.toml` →
 | ----------- | ------------------------- | ---------------- |
 | `bind_addr` | `FINGERPRINTD_BIND_ADDR`  | `127.0.0.1:8080` |
 
+### In-memory eviction / capacity (finding H2)
+
+The in-memory fuzzy backends are bounded so the process cannot grow without
+limit. Defaults are **generous and fail-safe** — a small workload behaves
+exactly as an unbounded store; only runaway growth is capped. Every eviction or
+drop is counted (never silent). These bounds apply to the native server only;
+the stateless edge (`fp-wasm`) is per-request and unbounded.
+
+| Key                          | Env var                                   | Default   | Meaning                                                                    |
+| ---------------------------- | ----------------------------------------- | --------- | -------------------------------------------------------------------------- |
+| `fuzzy_max_records`          | `FINGERPRINTD_FUZZY_MAX_RECORDS`          | `1000000` | Max distinct visitors in the library; oldest-seen is evicted over cap.     |
+| `fuzzy_record_ttl_secs`      | `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`      | `0`       | Evict records not seen within this window (seconds). `0` disables the TTL. |
+| `fuzzy_max_block`            | `FINGERPRINTD_FUZZY_MAX_BLOCK`            | `1024`    | Per-block visitor cap for the blocking index; over-cap inserts are dropped. |
+| `fuzzy_max_frequency_values` | `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` | `1000000` | Cap on distinct tracked `u_i` frequency values; new values over cap drop.  |
+
 ## Build & run
 
 ```bash
