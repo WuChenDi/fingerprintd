@@ -1,10 +1,16 @@
 [package]
-name    = "fingerprintd"
-version = "0.1.0"
+name        = "fingerprintd"
+description = "Server-authoritative device-fingerprinting service (anti-fraud / anti-automation): one-time challenge, server-side fuzzy matching, and passive-signal fusion."
+version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
+authors.workspace      = true
 license.workspace      = true
-publish                = false
+repository.workspace   = true
+homepage.workspace     = true
+keywords    = ["fingerprinting", "anti-fraud", "bot-detection", "device-id", "security"]
+categories  = ["web-programming::http-server", "authentication"]
+publish.workspace      = true
 
 [lints]
 workspace = true

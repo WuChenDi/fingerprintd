@@ -1,10 +1,26 @@
 {
-  "name": "@fingerprintd/web",
+  "name": "@cdlab/fingerprintd-web",
   "type": "module",
   "version": "0.0.0",
   "private": true,
-  "license": "UNLICENSED",
-  "description": "Browser playground for the fingerprintd challenge/identify flow — runs the @fingerprintd/client SDK against a server and visualizes the result.",
+  "license": "Apache-2.0",
+  "description": "Browser playground for the fingerprintd challenge/identify flow — runs the @cdlab/fingerprintd-client SDK against a server and visualizes the result.",
+  "keywords": [
+    "fingerprinting",
+    "playground",
+    "react",
+    "anti-fraud",
+    "demo"
+  ],
+  "homepage": "https://github.com/WuChenDi/fingerprintd/tree/main/apps/web#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WuChenDi/fingerprintd.git",
+    "directory": "apps/web"
+  },
+  "bugs": {
+    "url": "https://github.com/WuChenDi/fingerprintd/issues"
+  },
   "scripts": {
     "dev": "nsl run --name \"fingerprintd-web\" -f vite",
     "build": "vite build",
@@ -16,7 +32,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@fingerprintd/client": "workspace:*",
+    "@cdlab/fingerprintd-client": "workspace:*",
     "@fontsource-variable/inter": "^5.2.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

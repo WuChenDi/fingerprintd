@@ -9,7 +9,7 @@
       },
     },
     "apps/edge": {
-      "name": "@fingerprintd/edge",
+      "name": "@cdlab/fingerprintd-edge",
       "version": "0.0.0",
       "dependencies": {
         "@hono/zod-validator": "^0.8.0",
@@ -28,11 +28,11 @@
       },
     },
     "apps/web": {
-      "name": "@fingerprintd/web",
+      "name": "@cdlab/fingerprintd-web",
       "version": "0.0.0",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
-        "@fingerprintd/client": "workspace:*",
+        "@cdlab/fingerprintd-client": "workspace:*",
         "@fontsource-variable/inter": "^5.2.8",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -63,7 +63,7 @@
       },
     },
     "packages/client": {
-      "name": "@fingerprintd/client",
+      "name": "@cdlab/fingerprintd-client",
       "version": "0.0.0",
       "dependencies": {
         "@fingerprintjs/botd": "^2.0.0",
@@ -176,6 +176,12 @@
 
     "@bramus/specificity": ["@bramus/specificity@2.4.2", "", { "dependencies": { "css-tree": "^3.0.0" }, "bin": { "specificity": "bin/cli.js" } }, "sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw=="],
 
+    "@cdlab/fingerprintd-client": ["@cdlab/fingerprintd-client@workspace:packages/client"],
+
+    "@cdlab/fingerprintd-edge": ["@cdlab/fingerprintd-edge@workspace:apps/edge"],
+
+    "@cdlab/fingerprintd-web": ["@cdlab/fingerprintd-web@workspace:apps/web"],
+
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
     "@cloudflare/unenv-preset": ["@cloudflare/unenv-preset@2.16.1", "", { "peerDependencies": { "unenv": "2.0.0-rc.24", "workerd": ">1.20260305.0 <2.0.0-0" }, "optionalPeers": ["workerd"] }, "sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw=="],
@@ -277,12 +283,6 @@
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.1", "", { "os": "win32", "cpu": "x64" }, "sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A=="],
 
     "@exodus/bytes": ["@exodus/bytes@1.15.1", "", { "peerDependencies": { "@noble/hashes": "^1.8.0 || ^2.0.0" }, "optionalPeers": ["@noble/hashes"] }, "sha512-S6mL0yNB/Abt9Ei4tq8gDhcczc4S3+vQ4ra7vxnAf+YHC02srtqxKKZghx2Dq6p0e66THKwR6r8N6P95wEty7Q=="],
-
-    "@fingerprintd/client": ["@fingerprintd/client@workspace:packages/client"],
-
-    "@fingerprintd/edge": ["@fingerprintd/edge@workspace:apps/edge"],
-
-    "@fingerprintd/web": ["@fingerprintd/web@workspace:apps/web"],
 
     "@fingerprintjs/botd": ["@fingerprintjs/botd@2.0.0", "", {}, "sha512-yhuz23NKEcBDTHmGz/ULrXlGnbHenO+xZmVwuBkuqHUkqvaZ5TAA0kAgcRy4Wyo5dIBdkIf57UXX8/c9UlMLJg=="],
 
