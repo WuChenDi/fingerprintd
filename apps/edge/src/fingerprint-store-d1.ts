@@ -14,7 +14,7 @@
  * to the hand-written statements it replaced, so the cross-stack parity holds.
  */
 
-import { eq, inArray, sql } from 'drizzle-orm'
+import { eq, inArray, lt, sql } from 'drizzle-orm'
 import type { Db } from './db/client'
 import { getDb } from './db/client'
 import { blockingIndex, templates } from './db/schema'
@@ -155,5 +155,42 @@ export class D1FingerprintStore implements CandidateSource {
         .onConflictDoNothing(),
     )
     await this.db.batch([upsert, ...index])
+  }
+
+  /**
+   * GDPR erasure (M6): drop the visitor's template and all of its blocking-index
+   * rows in one atomic batch, so a subsequent recall cannot surface it.
+   * Idempotent — an unknown id deletes zero rows and still succeeds, so the
+   * caller never leaks whether the id existed.
+   */
+  async erase(visitorId: string): Promise<void> {
+    await this.db.batch([
+      this.db.delete(templates).where(eq(templates.visitorId, visitorId)),
+      this.db
+        .delete(blockingIndex)
+        .where(eq(blockingIndex.visitorId, visitorId)),
+    ])
+  }
+
+  /**
+   * Retention purge (M6): delete every template last seen before `nowMs -
+   * maxAgeMs` and their blocking-index rows, returning how many templates were
+   * removed. `maxAgeMs <= 0` disables retention (returns 0 without touching the
+   * table). Run from the scheduled cron (`index.ts`); also directly unit-tested.
+   */
+  async purgeOlderThan(nowMs: number, maxAgeMs: number): Promise<number> {
+    if (maxAgeMs <= 0) return 0
+    const cutoff = nowMs - maxAgeMs
+    const stale = await this.db
+      .select({ visitorId: templates.visitorId })
+      .from(templates)
+      .where(lt(templates.lastSeen, cutoff))
+    if (stale.length === 0) return 0
+    const ids = stale.map((row) => row.visitorId)
+    await this.db.batch([
+      this.db.delete(blockingIndex).where(inArray(blockingIndex.visitorId, ids)),
+      this.db.delete(templates).where(inArray(templates.visitorId, ids)),
+    ])
+    return ids.length
   }
 }

@@ -317,6 +317,13 @@ fn agreement_weight(m: f64, u: f64, sim: f64) -> f64 {
 /// components that took part in scoring (a sparse probe is less certain, §8).
 /// The passive JA4/UA consistency input (design §6) is a P2 signal, left
 /// neutral here.
+///
+/// This is **decision confidence, not identity trust** (finding M3). A first-ever
+/// device with no candidate is a confident `NewDevice` and can return a *high*
+/// confidence — it is confidently *new* — yet its identity is entirely
+/// unestablished. A downstream consumer must therefore key trust off
+/// `is_new_device` / `decision`, not `confidence` alone: a high confidence on a
+/// `NewDevice` verdict means "confidently unrecognized", not "trusted identity".
 #[allow(clippy::cast_precision_loss)] // small component counts; precision loss immaterial
 fn confidence(
     decision: Decision,

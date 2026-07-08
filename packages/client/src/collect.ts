@@ -5,9 +5,9 @@
  * ships only the interface plus a trivial stub.
  *
  * DESIGN: the client only COLLECTS — it never derives a visitorId or hash and
- * never mixes the challenge into the stable components. `stable_components` and
- * `challenge_response` stay SEPARATE: the latter is a freshness proof, never a
- * matching signal.
+ * never mixes the nonce into the stable components. `stable_components` and the
+ * `probe` stay SEPARATE: the latter is a freshness proof, never a matching
+ * signal.
  *
  * ENVIRONMENT LIMIT: there is no headless browser in this environment, so real
  * canvas/audio/webgl collection cannot be exercised. The stub below returns
@@ -20,8 +20,6 @@ import type { ChallengeResponse } from './types'
 export interface Collected {
   /** Raw stable components (no nonce mixed in) — the server's matching input. */
   stable_components: Record<string, unknown>
-  /** Optional active-challenge freshness proof (PRD §5). Never a matching signal. */
-  challenge_response?: Record<string, unknown>
   /** Optional nonce-probe response `hex(HMAC-SHA256(key, nonce))` (T8), computed
    *  when the challenge advertises `collect.challenge.verify` and the client
    *  holds the probe key. */
