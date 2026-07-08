@@ -47,20 +47,25 @@ To skip the nsl proxy: `bun x vite`.
 
 ## Deploy
 
-Ships as a **static-assets Cloudflare Worker** (`wrangler.jsonc`, no server
-code) to the same account as the edge Worker — `fingerprintd-web.<account>.workers.dev`.
+Ships to **Cloudflare Pages** (direct upload, `wrangler.jsonc`, no server code)
+as the `fingerprintd` project — `fingerprintd.pages.dev`. SPA history fallback
+is handled by `public/_redirects` (`/* /index.html 200`), copied into `dist/`
+at build time.
 
 ```bash
 bun run --filter @cdlab/fingerprintd-client build   # SDK dist (gitignored)
 bun run build                                 # SPA -> ./dist
-bun run deploy:dry                            # validate config, upload nothing
-bun run deploy                                # wrangler deploy
+bun run deploy                                # wrangler pages deploy --branch main
 ```
 
+`--branch main` marks the upload as a production deployment. If the Pages
+project's configured production branch is not `main`, change the flag to match.
+
 CI: `.github/workflows/deploy-web.yml` (manual `workflow_dispatch`) does the
-same — install → build SDK → build web → `wrangler deploy`. It reuses the
-`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` secrets shared with
-`deploy-edge.yml`.
+same — install → build SDK → build web → `wrangler pages deploy`. It reuses the
+`CLOUDFLARE_ACCOUNT_ID` secret shared with `deploy-edge.yml`; the
+`CLOUDFLARE_API_TOKEN` must additionally carry **Cloudflare Pages:Edit**
+(the edge token's `Workers Scripts:Edit` alone cannot deploy to Pages).
 
 ## Notes
 
