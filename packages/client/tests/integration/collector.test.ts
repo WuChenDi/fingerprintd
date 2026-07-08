@@ -106,8 +106,10 @@ describe('createCollector', () => {
 
     const collected = await collector(challengeWithVerify())
 
-    // Stable half: raw component present, probe/challenge NOT mixed in.
-    expect(collected.stable_components.ua).toEqual({ value: 'Chrome/120' })
+    // Stable half: component adapted to the server schema (audit H5 — `ua` is an
+    // unmapped scalar, so the FJS `{ value }` wrapper is unwrapped), probe/
+    // challenge NOT mixed in.
+    expect(collected.stable_components.ua).toBe('Chrome/120')
     expect(JSON.stringify(collected.stable_components)).not.toContain('probe:')
     // Challenge half: separate freshness proof.
     expect(collected.challenge_response?.canvas).toMatch(/^[0-9a-f]{64}$/)
@@ -161,7 +163,7 @@ describe('createCollector', () => {
     expect(sent.nonce).toBe('nonce-abc')
     expect(sent.ts).toBe(1_700_000_000_123)
     expect(sent.probe).toBe('probe:nonce-abc')
-    expect(sent.stable_components.ua).toEqual({ value: 'Chrome/120' })
+    expect(sent.stable_components.ua).toBe('Chrome/120')
     expect(sent.challenge_response.canvas).toMatch(/^[0-9a-f]{64}$/)
   })
 
