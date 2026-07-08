@@ -1,4 +1,4 @@
-# @fingerprintd/client
+# @cdlab/fingerprintd-client
 
 Browser SDK for the [`fingerprintd`](../../crates/fingerprintd) challenge/identify
 flow. It **collects** client-observed evidence and submits it; the **server**
@@ -16,23 +16,23 @@ POST /identify     -> { visitorId, confidence, decision, signals, ... }
 `run()` wires these together with an injected `Collector`. The evidence fields
 stay in their lanes:
 
-- `stable_components` — the "who is this device" matching input (TC2).
-- `probe` — `hex(HMAC-SHA256(key, nonce))` computed in WASM (TC4), the
+- `stable_components` — the "who is this device" matching input.
+- `probe` — `hex(HMAC-SHA256(key, nonce))` computed in WASM, the
   nonce-seeded **freshness** proof (NEVER a matching signal). Sent only when
   the challenge advertises `collect.challenge.verify` (i.e. the server has a
-  probe key). See [WASM probe](#wasm-probe-t8).
-- `ts` — the client clock (Unix ms) at collection (T9 timestamp window).
+  probe key). See [WASM probe](#wasm-probe).
+- `ts` — the client clock (Unix ms) at collection (the server timestamp window).
 
 ## Usage
 
 ```ts
-import { createCollector, run } from '@fingerprintd/client'
+import { createCollector, run } from '@cdlab/fingerprintd-client'
 
 const { identity, signatureValid } = await run({
   baseUrl: 'https://fp.example.com',
   // The full collector composes the stable half + WASM probe.
   collect: createCollector(),
-  // Optional: verify the T9 response signature (see below).
+  // Optional: verify the response signature (see below).
   signingKey: /* Uint8Array */ undefined,
 })
 ```
@@ -44,10 +44,10 @@ fingerprint**.
 
 > The server still advertises `collect.challenge.targets` (`['canvas','audio']`)
 > and `collect.challenge.seed`, but the client no longer consumes them: the
-> active-challenge collector was removed (audit L1) because neither backend read
-> its output. The `probe` field is the live freshness control.
+> active-challenge collector was removed because neither backend read its output.
+> The `probe` field is the live freshness control.
 
-## WASM probe (T8)
+## WASM probe
 
 The nonce probe is computed by the [`fp-wasm`](../../crates/fp-wasm) crate,
 compiled to WebAssembly and **vendored** under [`wasm/`](./wasm). `createCollector`
@@ -97,7 +97,7 @@ certification is **deferred to a human**.
 
 Both are **defense in depth**, off by default:
 
-- **Probe (T8):** set `probe_key` in the `fingerprintd` config. Enforcement
+- **Probe:** set `probe_key` in the `fingerprintd` config. Enforcement
   activates whenever `probe_key` is `Some` (non-empty) — there is **no separate
   `require_probe` flag** (`crates/fingerprintd/src/config.rs`, `probe.rs`). The
   server then advertises `collect.challenge.verify` and rejects a missing/wrong
@@ -108,7 +108,7 @@ Both are **defense in depth**, off by default:
   # then copy fp_wasm.js / fp_wasm.d.ts / fp_wasm_bg.wasm(.d.ts) into packages/client/wasm/
   ```
 
-- **Response signature (T9):** set `response_signing_key` in the config. Each
+- **Response signature:** set `response_signing_key` in the config. Each
   `/identify` success then carries `x-fp-timestamp` and `x-fp-signature`
   (`hex(HMAC-SHA256(key, be64(issuedMs) ++ body))`, `signing.rs`). Pass the same
   key to the client as `run({ signingKey })` to have `run()` verify it.
