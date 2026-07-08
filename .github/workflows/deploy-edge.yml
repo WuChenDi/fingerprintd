@@ -78,7 +78,10 @@ jobs:
       - name: Rebuild vendored WASM (crates/fp-wasm -> apps/edge/wasm)
         env:
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
-        run: wasm-pack build --target web --out-dir apps/edge/wasm crates/fp-wasm
+        # `--out-dir` is resolved relative to the CRATE dir — pass an ABSOLUTE
+        # path, else it lands in `crates/fp-wasm/apps/edge/wasm` and the deployed
+        # Worker ships the committed WASM instead of this fresh build.
+        run: wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/apps/edge/wasm" crates/fp-wasm
 
       # Optional: apply the drizzle-kit migrations in apps/edge/src/database to
       # the remote D1 bound in wrangler.jsonc before the code goes live.

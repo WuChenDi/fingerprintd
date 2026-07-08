@@ -176,7 +176,9 @@ wrangler d1 migrations apply fingerprintd            # remote (needs an account)
 `crates/fp-core` or `crates/fp-wasm`:
 
 ```bash
-wasm-pack build --target web --out-dir apps/edge/wasm crates/fp-wasm
+# `--out-dir` is relative to the CRATE dir — use an absolute path so it lands in
+# the vendor dir, not `crates/fp-wasm/apps/edge/wasm`.
+wasm-pack build --target web --out-dir "$PWD/apps/edge/wasm" crates/fp-wasm
 rm -f apps/edge/wasm/.gitignore apps/edge/wasm/package.json  # keep only the glue + .wasm
 ```
 
