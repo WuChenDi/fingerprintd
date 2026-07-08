@@ -89,13 +89,27 @@ impl InMemoryNonceStore {
             expires_at: Instant::now() + ttl,
             used: false,
         };
-        self.lock().insert(nonce.clone(), entry);
+        let mut entries = self.lock();
+        // Lazy reap: drop every already-expired entry BEFORE inserting the new
+        // one. Sweeping at issue time (not consume time) bounds memory to nonces
+        // issued within one live TTL window without a background task, and
+        // running it before the insert leaves the just-minted nonce untouched —
+        // so a zero-TTL nonce is still present to be consumed as `Expired`.
+        entries.retain(|_, e| Instant::now() < e.expires_at);
+        entries.insert(nonce.clone(), entry);
         nonce
     }
 
     /// Lock the entry map, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Entry>> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Number of entries currently held. Test-only observability hook used to
+    /// assert the lazy reaper shrank the map.
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.lock().len()
     }
 }
 
@@ -159,5 +173,17 @@ mod tests {
     async fn issued_nonces_are_unique() {
         let store = InMemoryNonceStore::new(Duration::from_secs(30));
         assert_ne!(store.issue().await, store.issue().await);
+    }
+
+    #[tokio::test]
+    async fn expired_entries_are_reaped_on_issue() {
+        let store = InMemoryNonceStore::new(Duration::from_secs(30));
+        // First nonce is born expired.
+        let first = store.issue_with_ttl(Duration::ZERO);
+        // Issuing the second nonce triggers the lazy sweep, dropping `first`.
+        let second = store.issue_with_ttl(Duration::from_secs(30));
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.consume(&first).await, NonceOutcome::Unknown);
+        assert_eq!(store.consume(&second).await, NonceOutcome::Valid);
     }
 }

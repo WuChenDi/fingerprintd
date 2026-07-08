@@ -113,3 +113,45 @@ jobs:
       - name: Build
         working-directory: apps/web
         run: bun run build
+
+  edge:
+    name: "edge (apps/edge: vitest — router + state + parity)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Single workspace lockfile lives at the repo root (mirror the web-app job).
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: apps/edge
+        run: bun run typecheck
+
+      # Runs app.test.ts + state.workers.test.ts + parity.workers.test.ts
+      # via @cloudflare/vitest-pool-workers (miniflare); fails on any failure.
+      - name: Test (vitest — workers pool)
+        working-directory: apps/edge
+        run: bun run test
+
+  js-sca:
+    name: "js-sca (bun audit — workspace supply-chain)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # bun audit exits non-zero on advisories >= the given level. Gate at
+      # high: fails CI on high/critical vulns while tolerating a transitive
+      # dev-only moderate (esbuild dev-server GHSA-67mh-4wv8-2f99) that no
+      # workspace dep exposes at runtime.
+      - name: Audit dependencies
+        run: bun audit --audit-level=high

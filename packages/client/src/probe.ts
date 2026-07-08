@@ -13,8 +13,12 @@
  * primary anti-replay guarantee.
  *
  * VENDORED ARTIFACT: `../wasm/fp_wasm_bg.wasm` is a DEV build keyed with the test
- * vector secret (`test-probe-secret`). A real deployment must rebuild it with
- * `FP_PROBE_KEY=<server probe_key> wasm-pack build --target web crates/fp-wasm`
+ * vector secret (`test-probe-secret`) — the key the parity test asserts (not the
+ * `fp-wasm-dev-probe-key` SOURCE default in `crates/fp-wasm/src/lib.rs`, which
+ * applies only to a build with `FP_PROBE_KEY` unset). A real deployment must
+ * rebuild BOTH bake points with the server's key — the client SDK WASM
+ * (`packages/client/wasm`, this artifact) and the edge WASM (`apps/edge/wasm`) —
+ * via `FP_PROBE_KEY=<server probe_key> wasm-pack build --target web crates/fp-wasm`
  * so the embedded key matches the server. See `README.md`.
  *
  * ENVIRONMENT LIMIT: there is no headless browser here. In the browser the

@@ -49,9 +49,15 @@ use wasm_bindgen::prelude::{JsError, wasm_bindgen};
 
 /// The probe HMAC key embedded at build time.
 ///
-/// Defaults to a placeholder; a deployment build overrides it with the server's
-/// `probe_key` via `FP_PROBE_KEY=<secret> wasm-pack build ...`. Extractable from
-/// the shipped artifact — see the module docs on why this is depth, not a lock.
+/// A deployment build overrides it with the server's `probe_key` via
+/// `FP_PROBE_KEY=<secret> wasm-pack build ...`. The `fp-wasm-dev-probe-key`
+/// fallback below applies ONLY to a build with `FP_PROBE_KEY` unset — it is NOT
+/// the key in this repo's committed artifacts. The vendored WASM (both
+/// `apps/edge/wasm` and `packages/client/wasm`) is instead baked with
+/// `FP_PROBE_KEY=test-probe-secret` (the shared parity vector) so the headless
+/// parity tests — `matches_server_probe_vector` here and the client
+/// `probe.test.ts` — pass without a real deployment key. Extractable from the
+/// shipped artifact — see the module docs on why this is depth, not a lock.
 const PROBE_KEY: &str = match option_env!("FP_PROBE_KEY") {
     Some(key) => key,
     None => "fp-wasm-dev-probe-key",

@@ -107,7 +107,27 @@ impl FuzzyStore {
     /// drifts the winning template (§7); a review returns the suspected visitor
     /// without updating it (anti-poisoning, §7); a new device is minted and
     /// stored. `now_ms` is Unix milliseconds for the stored timestamps.
+    ///
+    /// **Atomicity (finding M1):** the evaluate-then-observe read-modify-write
+    /// runs under one per-store guard, so concurrent `identify` calls cannot
+    /// interleave their `observe` between another call's `evaluate` and
+    /// `observe`. Each backend guards only its own state, so without this seam
+    /// the read (`evaluate`) and the write-back (`observe`) are two separate
+    /// atomic steps; a racing `observe` between them could change the frequency
+    /// material and thus perturb scores non-deterministically. The guard makes
+    /// the whole RMW a single critical section — the single-threaded outcome is
+    /// byte-for-byte unchanged, at the cost of serializing `identify`. The
+    /// deliberate trade-off: the read-only [`FuzzyStore::score`] path does **no**
+    /// `observe` and never takes this guard, so the stateless edge remains
+    /// lock-light and its parity/perf are unaffected.
     pub fn identify(&self, components: &Value, now_ms: u64) -> MatchOutcome {
+        // Hold the guard across evaluate + observe so the RMW is atomic; recover
+        // from poisoning like the backend locks (a prior panic left no logical
+        // corruption — the `()` guard carries no state).
+        let _guard = self
+            .identify_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let outcome = self.evaluate(components);
         // Persist per the verdict (design §7): a confirmed match drifts the
         // winning template toward this observation and a new device is stored
@@ -524,5 +544,104 @@ mod tests {
         let confirm = store.identify(&full_probe(), 9_000);
         assert_eq!(confirm.decision, Decision::Match);
         assert_eq!(store.record(&id).unwrap().last_seen, 9_000);
+    }
+
+    /// (M1, concurrency) Many threads hammer `identify` against one shared store
+    /// with a mix of the same and distinct devices. `identify`'s evaluate +
+    /// observe run under the per-store guard, so the concurrent read-modify-write
+    /// stays atomic. The store must end in a consistent state: no panic, one
+    /// stable record per distinct device, every observation folded in exactly
+    /// once, and a re-identify of an already-seen full probe still Matches its id.
+    #[test]
+    fn concurrent_identify_stays_consistent() {
+        use std::{
+            collections::HashSet,
+            sync::{Arc, Mutex},
+            thread,
+        };
+
+        const THREADS: usize = 8;
+        const ITERS: u64 = 40;
+
+        // Distinct full devices. Each recalls only itself (disjoint blocking
+        // keys), so every identify is a Match — or the one-time NewDevice — that
+        // folds an observation in, never a Review, and no two ever cross-match.
+        let devices: Arc<Vec<Value>> = Arc::new(
+            (0..8)
+                .map(|i| {
+                    json!({
+                        "webgl": format!("ANGLE (Vendor {i})"),
+                        "platform": format!("Platform-{i}"),
+                        "timezone": format!("Zone/{i}"),
+                        "audio": format!("12{i}.5"),
+                        "cpu_cores": 4 + i,
+                        "device_memory": 4 + i,
+                        "fonts": [
+                            format!("F{i}a"), format!("F{i}b"), format!("F{i}c"),
+                            format!("F{i}d"), format!("F{i}e"),
+                        ],
+                        "user_agent": format!("Agent/{i}"),
+                    })
+                })
+                .collect(),
+        );
+
+        let store = Arc::new(FuzzyStore::new());
+        let seen: Arc<Mutex<HashSet<(usize, String)>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        let handles: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let store = Arc::clone(&store);
+                let devices = Arc::clone(&devices);
+                let seen = Arc::clone(&seen);
+                thread::spawn(move || {
+                    let mut local = HashSet::new();
+                    for i in 0..ITERS {
+                        // Every thread hammers every device, interleaving the
+                        // same-device evaluate/observe across threads — the raced
+                        // RMW the guard serializes.
+                        for (d, probe) in devices.iter().enumerate() {
+                            let now = 1_000 + (t as u64) * 1_000_000 + i * 1_000 + d as u64;
+                            let out = store.identify(probe, now);
+                            assert!(
+                                matches!(out.decision, Decision::Match | Decision::NewDevice),
+                                "unexpected {:?} for device {d}",
+                                out.decision,
+                            );
+                            local.insert((d, out.visitor_id));
+                        }
+                    }
+                    seen.lock().unwrap().extend(local);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("identify thread panicked");
+        }
+
+        // One stable id per distinct device: the count of (device, id) pairs
+        // equals the device count, so the concurrent RMW never fractured a device
+        // into two records.
+        let seen = Arc::into_inner(seen).unwrap().into_inner().unwrap();
+        assert_eq!(seen.len(), devices.len());
+
+        // Every observation was folded in exactly once — no lost or double
+        // counted writes under contention.
+        for (d, id) in &seen {
+            let record = store.record(id).expect("device record present");
+            assert_eq!(
+                record.observation_count,
+                THREADS as u64 * ITERS,
+                "device {d} observation_count",
+            );
+        }
+
+        // Reproducibility: after all the churn, re-identifying any full device
+        // still Matches its established id.
+        for (d, probe) in devices.iter().enumerate() {
+            let out = store.identify(probe, 9_000_000);
+            assert_eq!(out.decision, Decision::Match, "re-identify device {d}");
+            assert!(seen.contains(&(d, out.visitor_id)));
+        }
     }
 }

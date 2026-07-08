@@ -8,7 +8,10 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Mutex, PoisonError},
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use super::component::Stored;
@@ -45,16 +48,44 @@ pub trait FingerprintStore: Send + Sync {
 }
 
 /// In-memory `visitorId → record` fingerprint library (design §11).
+///
+/// Bounded, fail-safe growth: an optional record cap evicts the least-recently
+/// seen (smallest `last_seen`) visitor once exceeded, and an optional TTL drops
+/// entries not seen within the window on the next `observe`. Both bounds are
+/// generous by default so a small workload behaves exactly as an unbounded
+/// store; every eviction is counted via [`RecordStore::evicted`], never silent
+/// (matching the blocking `dropped()` precedent, design §4).
 #[derive(Debug, Default)]
 pub struct RecordStore {
     /// `visitorId → template`.
     records: Mutex<HashMap<String, FingerprintRecord>>,
+    /// Retain at most this many visitors; `None` is unbounded.
+    max_records: Option<usize>,
+    /// Drop entries whose `now_ms - last_seen` exceeds this on observe; `None`
+    /// is unbounded.
+    record_ttl_ms: Option<u64>,
+    /// Count of records evicted by cap or TTL (observability, not silent).
+    evicted: AtomicU64,
 }
 
 impl RecordStore {
-    /// Create an empty store.
+    /// Create an empty, unbounded store.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create an empty store bounded by an optional record cap and TTL.
+    ///
+    /// `max_records` caps the number of retained visitors (evicting the oldest
+    /// `last_seen` when exceeded); `record_ttl_ms` drops entries not seen within
+    /// the window on the next `observe`. `None` for either means unbounded.
+    pub fn with_capacity(max_records: Option<usize>, record_ttl_ms: Option<u64>) -> Self {
+        Self {
+            records: Mutex::new(HashMap::new()),
+            max_records,
+            record_ttl_ms,
+            evicted: AtomicU64::new(0),
+        }
     }
 
     /// Fold an observation into `visitor`'s record, creating it if new.
@@ -70,7 +101,7 @@ impl RecordStore {
         now_ms: u64,
     ) -> bool {
         let mut records = self.lock();
-        if let Some(record) = records.get_mut(visitor) {
+        let is_new = if let Some(record) = records.get_mut(visitor) {
             for (name, value) in components {
                 record.freshness.insert(name.clone(), now_ms);
                 record.components.insert(name, value);
@@ -91,7 +122,54 @@ impl RecordStore {
                 },
             );
             true
+        };
+        self.evict(&mut records, visitor, now_ms);
+        is_new
+    }
+
+    /// Enforce the TTL then the record cap, counting every eviction.
+    ///
+    /// Runs after each upsert under the same lock: TTL drops entries not seen
+    /// within `record_ttl_ms` (the just-observed `visitor` has `last_seen ==
+    /// now_ms`, so it is never dropped); the cap then evicts the smallest
+    /// `last_seen` (oldest) entries until within `max_records`.
+    fn evict(&self, records: &mut HashMap<String, FingerprintRecord>, visitor: &str, now_ms: u64) {
+        let mut evicted = 0u64;
+        if let Some(ttl) = self.record_ttl_ms {
+            let stale: Vec<String> = records
+                .iter()
+                .filter(|(_, r)| now_ms.saturating_sub(r.last_seen) > ttl)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in stale {
+                records.remove(&id);
+                evicted += 1;
+            }
         }
+        if let Some(cap) = self.max_records {
+            while records.len() > cap {
+                // Evict the oldest (smallest `last_seen`); never the entry just
+                // observed, which carries the largest `last_seen` of `now_ms`.
+                let Some(oldest) = records
+                    .iter()
+                    .filter(|(id, _)| id.as_str() != visitor)
+                    .min_by_key(|(_, r)| r.last_seen)
+                    .map(|(id, _)| id.clone())
+                else {
+                    break;
+                };
+                records.remove(&oldest);
+                evicted += 1;
+            }
+        }
+        if evicted > 0 {
+            self.evicted.fetch_add(evicted, Ordering::Relaxed);
+        }
+    }
+
+    /// Total records evicted by cap or TTL so far.
+    pub fn evicted(&self) -> u64 {
+        self.evicted.load(Ordering::Relaxed)
     }
 
     /// Snapshot of `visitor`'s record, if present.
@@ -184,6 +262,38 @@ mod tests {
         let record = store.get("v1").unwrap();
         assert_eq!(record.freshness.get("ua"), Some(&2_000));
         assert_eq!(record.freshness.get("tz"), Some(&1_000));
+    }
+
+    #[test]
+    fn cap_evicts_oldest_and_counts() {
+        let salt = Salt::random();
+        // Cap of 3; observe 5 distinct visitors with strictly increasing
+        // `last_seen`, so v1/v2 (oldest) are evicted and v3/v4/v5 survive.
+        let store = RecordStore::with_capacity(Some(3), None);
+        for i in 1..=5u64 {
+            store.observe(&format!("v{i}"), category(&salt, "ua", "x"), i * 1_000);
+        }
+        assert_eq!(store.len(), 3);
+        assert_eq!(store.evicted(), 2);
+        assert!(store.get("v1").is_none());
+        assert!(store.get("v2").is_none());
+        assert!(store.get("v3").is_some());
+        assert!(store.get("v4").is_some());
+        assert!(store.get("v5").is_some());
+    }
+
+    #[test]
+    fn ttl_drops_stale_entry_on_later_observe() {
+        let salt = Salt::random();
+        // TTL of 1_000 ms, no cap. v1 seen at t=1_000; a later observe at
+        // t=3_000 (age 2_000 > 1_000) evicts it while recording v2.
+        let store = RecordStore::with_capacity(None, Some(1_000));
+        store.observe("v1", category(&salt, "ua", "x"), 1_000);
+        assert_eq!(store.len(), 1);
+        store.observe("v2", category(&salt, "ua", "y"), 3_000);
+        assert!(store.get("v1").is_none());
+        assert!(store.get("v2").is_some());
+        assert_eq!(store.evicted(), 1);
     }
 
     #[test]

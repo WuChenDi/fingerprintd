@@ -1,0 +1,85 @@
+name: WASM drift
+
+# Guards that the committed WASM artifacts in `apps/edge/wasm` and
+# `packages/client/wasm` are a faithful build of `crates/fp-wasm` source — i.e.
+# that a source change was not left un-vendored.
+#
+# WHY NOT A BYTE DIFF: `wasm-pack` output is NOT byte-reproducible across
+# machines (host LLVM / wasm-opt binary / build paths differ), so a
+# rebuild-then-`git diff` guard fails whenever the artifacts were vendored on a
+# different host than the runner — a false positive with no functional meaning.
+# We therefore verify FUNCTIONAL equivalence instead of byte equality.
+#
+# HOW IT WORKS: rebuild both targets from source (overwriting the vendored dirs),
+# then run the suites that exercise the WASM against the committed parity/vector
+# fixtures. If the SOURCE-built WASM passes the same fixtures the committed
+# artifacts are asserted against elsewhere (edge parity in the `edge` job, the
+# probe vector in the `web` job), then committed and source are functionally
+# equivalent on that coverage. A source change that was never re-vendored makes
+# one of these fail. Cross-machine stable because the checks are behavioural, not
+# byte-exact.
+#
+# Invariants still held fixed for the rebuild:
+#   1. TOOLCHAIN PIN (rustc 1.96.0 / wasm-pack 0.15.0) — kept for parity with the
+#      deploy workflows so the build is predictable.
+#   2. FP_PROBE_KEY=test-probe-secret — the shared TEST probe key the fixtures
+#      assert (fp-wasm `matches_server_probe_vector`, client `probe.test.ts` →
+#      vector ad83144894f917b94072c2f7b3246af66d3bc5a450562ccf3671ed64d33137d0).
+#      Rebuilding with a different/unset key would break those functional checks.
+#   3. ABSOLUTE --out-dir — wasm-pack resolves `--out-dir` relative to the CRATE
+#      dir, so an absolute `$GITHUB_WORKSPACE/...` path is required or it vendors
+#      nothing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  wasm-drift:
+    name: wasm-drift (rebuild + functional parity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned for a predictable build (see comment 1).
+      - name: Install pinned Rust toolchain (1.96.0)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pinned wasm-pack (0.15.0)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Rebuild vendored WASM from source (both targets)
+        env:
+          # Must match the key the fixtures assert — see comment 2. Absolute
+          # --out-dir — see comment 3. This OVERWRITES the committed artifacts so
+          # the suites below run against the freshly source-built WASM.
+          FP_PROBE_KEY: test-probe-secret
+        run: |
+          wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/apps/edge/wasm"      crates/fp-wasm
+          wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/packages/client/wasm" crates/fp-wasm
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      # Edge parity exercises the source-built edge WASM against the committed
+      # native fixture (Worker == native); the client suite exercises the
+      # source-built client WASM against the shared probe vector. Passing here ⇒
+      # the committed artifacts are functionally equivalent to current source.
+      - name: Edge parity against source-built WASM
+        working-directory: apps/edge
+        run: bun run test
+
+      - name: Client probe vector against source-built WASM
+        working-directory: packages/client
+        run: bun run test

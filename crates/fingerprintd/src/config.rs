@@ -99,6 +99,25 @@ pub struct Config {
     /// within `±ts_skew_secs` of server time. Overridable via
     /// `FINGERPRINTD_TS_SKEW_SECS`.
     pub ts_skew_secs: u64,
+    /// Cap on distinct visitors kept in the in-memory fingerprint library
+    /// (finding H2). Once exceeded, the oldest-seen visitor is evicted (and
+    /// counted). Fail-safe generous default so a small workload is unaffected;
+    /// bounds unbounded growth. Overridable via `FINGERPRINTD_FUZZY_MAX_RECORDS`.
+    pub fuzzy_max_records: usize,
+    /// Time-to-live, in seconds, for an in-memory record: an entry not seen
+    /// within this window is evicted on the next observe (finding H2). `0`
+    /// disables TTL eviction (the default). Overridable via
+    /// `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`.
+    pub fuzzy_record_ttl_secs: u64,
+    /// Per-block visitor cap for the blocking index (design §4). A block over
+    /// this size drops (and counts) further insertions. Overridable via
+    /// `FINGERPRINTD_FUZZY_MAX_BLOCK`.
+    pub fuzzy_max_block: usize,
+    /// Cap on distinct tracked frequency values for `u_i` estimation (finding
+    /// H2). A new value beyond the cap is dropped (already-tracked values keep
+    /// counting). Fail-safe generous default. Overridable via
+    /// `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES`.
+    pub fuzzy_max_frequency_values: usize,
 }
 
 impl Default for Config {
@@ -111,6 +130,12 @@ impl Default for Config {
             response_signing_key: None,
             enforce_ts_window: false,
             ts_skew_secs: 30,
+            // Fail-safe: match `EvictionPolicy::default()` — generous bounds that
+            // leave small-workload behaviour identical while capping growth.
+            fuzzy_max_records: 1_000_000,
+            fuzzy_record_ttl_secs: 0,
+            fuzzy_max_block: crate::fuzzy::blocking::DEFAULT_MAX_BLOCK,
+            fuzzy_max_frequency_values: 1_000_000,
         }
     }
 }
