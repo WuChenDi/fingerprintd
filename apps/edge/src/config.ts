@@ -34,6 +34,12 @@ export interface Env {
   FP_NONCE_TTL_SECS?: string
   /** `"1"`/`"true"` trusts edge-injected passive-signal headers. Default OFF. */
   FP_TRUST_EDGE_HEADERS?: string
+  /** Admin key gating `DELETE /visitor/{id}` GDPR erasure (M6, Worker Secret).
+   *  Empty/unset ⇒ the erasure endpoint is DISABLED (returns 404, fail-closed). */
+  FP_ADMIN_KEY?: string
+  /** D1 retention window in seconds: templates whose `last_seen` is older than
+   *  this are purged by the scheduled cron (M6). `0`/unset ⇒ retention disabled. */
+  FP_RETENTION_SECS?: string
   /** Comma-separated allowed CORS origins for the browser playground, e.g.
    *  `https://fingerprintd-web.example.workers.dev`. `*` allows any origin.
    *  Empty/unset ⇒ no CORS headers (same-origin / server-to-server only). */
@@ -56,6 +62,11 @@ export interface EdgeConfig {
   nonceTtlSecs: number
   /** Whether edge-injected passive-signal headers are trusted. */
   trustEdgeHeaders: boolean
+  /** Admin key for `DELETE /visitor/{id}` erasure; `undefined` ⇒ endpoint
+   *  DISABLED (fail-closed 404). Compared constant-time against the bearer. */
+  adminKey?: string
+  /** D1 retention window in milliseconds; `0` ⇒ retention disabled (no purge). */
+  retentionMs: number
   /** Allowed CORS origins for the browser playground; `['*']` allows any.
    *  Empty ⇒ CORS disabled (no `Access-Control-*` headers emitted). */
   corsOrigins: string[]
@@ -105,6 +116,8 @@ export function resolveConfig(env: Env): EdgeConfig {
     tsSkewMs: intVar(env.FP_TS_SKEW_SECS, 30) * 1000,
     nonceTtlSecs: intVar(env.FP_NONCE_TTL_SECS, 30),
     trustEdgeHeaders: flag(env.FP_TRUST_EDGE_HEADERS),
+    adminKey: secret(env.FP_ADMIN_KEY),
+    retentionMs: intVar(env.FP_RETENTION_SECS, 0) * 1000,
     corsOrigins: originList(env.FP_CORS_ORIGINS),
   }
 }

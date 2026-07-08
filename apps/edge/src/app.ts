@@ -62,15 +62,20 @@ const CLAIMED_UA_KEYS = ['userAgent', 'user_agent', 'ua']
 
 /**
  * `POST /identify` request body (PRD §5). `stable_components` is an arbitrary
- * component object; `probe`/`ts` are optional depth checks. Unknown keys (e.g.
- * a forward-compat `challenge_response`) are stripped, not rejected.
+ * component object (nested keys unrestricted); `probe`/`ts` are optional depth
+ * checks. The schema is `.strict()` — any UNKNOWN top-level key (e.g. a stray
+ * `challenge_response`) is REJECTED with a `400`, mirroring the native
+ * `deny_unknown_fields` (M6a/L1). This removes the former forward-compat
+ * tolerance: a client must send exactly these fields.
  */
-const identifySchema = z.object({
-  nonce: z.string(),
-  stable_components: z.record(z.string(), z.unknown()),
-  probe: z.string().optional(),
-  ts: z.number().optional(),
-})
+const identifySchema = z
+  .object({
+    nonce: z.string(),
+    stable_components: z.record(z.string(), z.unknown()),
+    probe: z.string().optional(),
+    ts: z.number().optional(),
+  })
+  .strict()
 
 /** Build the edge Hono app over the injected {@link Deps}. */
 export function createApp(deps: Deps): Hono {
@@ -173,7 +178,48 @@ export function createApp(deps: Deps): Hono {
     return signedJson(response, deps.config, deps.engine, now)
   })
 
+  // GDPR erasure (M6): remove every trace of a visitor. Fail-closed and
+  // admin-gated — never exposed without an explicit key, never leaks existence.
+  //   - no admin key configured ⇒ endpoint DISABLED ⇒ 404 (as if unrouted).
+  //   - missing/wrong `Authorization: Bearer <key>` ⇒ 401 (constant-time compare).
+  //   - authorized ⇒ erase then 204, idempotent even for an unknown id.
+  app.delete('/visitor/:id', async (c) => {
+    const { adminKey } = deps.config
+    if (!adminKey) return c.body(null, 404)
+
+    const bearer = bearerToken(c.req.header('authorization'))
+    if (bearer === undefined || !constantTimeEqual(bearer, adminKey)) {
+      return c.body(null, 401)
+    }
+
+    await deps.candidates.erase(c.req.param('id'))
+    return c.body(null, 204)
+  })
+
   return app
+}
+
+/** Extract the token from an `Authorization: Bearer <token>` header, or
+ *  `undefined` when the header is absent or not a bearer credential. */
+function bearerToken(header: string | undefined): string | undefined {
+  if (header === undefined) return undefined
+  const match = /^Bearer (.+)$/.exec(header)
+  return match ? match[1] : undefined
+}
+
+/**
+ * Constant-time string equality for the admin credential check: unequal lengths
+ * fail fast, but equal-length inputs are compared by XOR-accumulating every
+ * char code so the loop never short-circuits on the first mismatch — a timing
+ * side channel must not leak how many leading characters matched.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return diff === 0
 }
 
 /** Whether a client `ts` sits within `±skewMs` of `now` (both Unix ms). */

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
 import type { Env } from '../src/config'
@@ -119,6 +119,23 @@ describe('POST /identify', () => {
     expect(body.confidence).toBeLessThanOrEqual(1)
     // Neutral degraded signals when no Bot Management headers are present.
     expect(body.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
+  })
+
+  it('rejects an unknown top-level field with 400 (strict schema, M6a/L1)', async () => {
+    const deps = makeDeps()
+    const { nonce } = await challenge(deps)
+    // A stray `challenge_response` (or any extra top-level key) is no longer
+    // tolerated: the strict schema fails zValidator, yielding a 400 before the
+    // handler runs — the nonce is NOT consumed.
+    const resp = await handleRequest(
+      postIdentify({
+        nonce,
+        stable_components: { ua: 'x' },
+        challenge_response: { canvas: 'abc' },
+      }),
+      deps,
+    )
+    expect(resp.status).toBe(400)
   })
 
   it('rejects an unknown nonce with 401', async () => {
@@ -376,6 +393,55 @@ describe('passive signals (edge JA4/IP fusion, M2)', () => {
     expect(forged.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
     // The forged copy neither downgrades confidence nor raises the IP band.
     expect(forged.confidence).toBeCloseTo(baseline.confidence, 12)
+  })
+})
+
+describe('DELETE /visitor/:id erasure (M6b)', () => {
+  /** Deps with an injected candidate source whose `erase` is spy-able. */
+  function eraseDeps(env: Env = {}) {
+    const candidates = new EmptyCandidateSource()
+    const erase = vi.spyOn(candidates, 'erase')
+    return { deps: { ...makeDeps(env), candidates }, erase }
+  }
+
+  const del = (id: string, headers: Record<string, string> = {}) =>
+    new Request(`https://edge.test/visitor/${id}`, {
+      method: 'DELETE',
+      headers,
+    })
+
+  it('returns 404 when no admin key is configured (endpoint disabled)', async () => {
+    const { deps, erase } = eraseDeps()
+    const resp = await handleRequest(del('v1', { authorization: 'Bearer x' }), deps)
+    expect(resp.status).toBe(404)
+    expect(erase).not.toHaveBeenCalled()
+  })
+
+  it('returns 401 on a missing or wrong bearer credential', async () => {
+    const { deps, erase } = eraseDeps({ FP_ADMIN_KEY: 'admin-secret' })
+    // Missing header.
+    expect((await handleRequest(del('v1'), deps)).status).toBe(401)
+    // Wrong key.
+    expect(
+      (await handleRequest(del('v1', { authorization: 'Bearer nope' }), deps))
+        .status,
+    ).toBe(401)
+    // Not a bearer scheme.
+    expect(
+      (await handleRequest(del('v1', { authorization: 'admin-secret' }), deps))
+        .status,
+    ).toBe(401)
+    expect(erase).not.toHaveBeenCalled()
+  })
+
+  it('returns 204 and erases the visitor when authorized', async () => {
+    const { deps, erase } = eraseDeps({ FP_ADMIN_KEY: 'admin-secret' })
+    const resp = await handleRequest(
+      del('visitor-42', { authorization: 'Bearer admin-secret' }),
+      deps,
+    )
+    expect(resp.status).toBe(204)
+    expect(erase).toHaveBeenCalledWith('visitor-42')
   })
 })
 

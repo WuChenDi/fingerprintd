@@ -62,4 +62,27 @@ export default {
     app ??= createApp(buildDeps(env))
     return app.fetch(request)
   },
+
+  /**
+   * D1 retention purge (M6), driven by the `wrangler.jsonc` cron trigger. When
+   * `FP_RETENTION_SECS` is set (>0) and D1 is bound, delete every template last
+   * seen beyond the window plus its blocking-index rows; disabled (0) ⇒ no-op.
+   * The purge query lives on {@link D1FingerprintStore.purgeOlderThan} so it is
+   * unit-testable without the cron.
+   */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    const config = resolveConfig(env)
+    if (config.retentionMs <= 0 || !env.DB) return
+    const purged = await new D1FingerprintStore(env.DB).purgeOlderThan(
+      Date.now(),
+      config.retentionMs,
+    )
+    if (purged > 0) {
+      console.log(`retention purge: removed ${purged} stale template(s)`)
+    }
+  },
 }

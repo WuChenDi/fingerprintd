@@ -65,6 +65,14 @@ export interface CandidateSource {
     blockingKeys: string[],
     nowMs: number,
   ): Promise<void>
+
+  /**
+   * GDPR erasure (M6): remove every trace of `visitorId` — its template and all
+   * of its blocking-index rows — so a recall can no longer surface it. Idempotent:
+   * erasing an unknown id is a successful no-op (the caller must not leak whether
+   * the id existed).
+   */
+  erase(visitorId: string): Promise<void>
 }
 
 /**
@@ -104,6 +112,10 @@ export class EmptyCandidateSource implements CandidateSource {
   }
 
   persist(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  erase(_visitorId: string): Promise<void> {
     return Promise.resolve()
   }
 }
