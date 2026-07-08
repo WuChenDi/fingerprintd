@@ -12,10 +12,10 @@
  * burn, candidate recall, drift write-back) is the host's, so this stays pure.
  */
 
-import { FpEngine, initSync } from '../wasm/fp_wasm.js'
+import { FpEngine, initSync, passive_signals } from '../wasm/fp_wasm.js'
 import type { EdgeConfig } from './config'
 import type { Candidate } from './state'
-import type { ScoreOutcome } from './types'
+import type { PassiveVerdict, ScoreOutcome } from './types'
 
 /** One-time wasm-bindgen module init (the module is a process-wide singleton). */
 let initialized = false
@@ -73,6 +73,26 @@ export class EdgeEngine {
   ): ScoreOutcome {
     const request = JSON.stringify({ components, candidates })
     return JSON.parse(this.inner.score(request)) as ScoreOutcome
+  }
+
+  /**
+   * Passive-signal verdict for one request, computed by the shared WASM free
+   * export (`fp_core::signals::compute`) so the edge reaches the SAME UA↔TLS /
+   * IP-risk verdict as the native server. Secret-free — unlike the other methods
+   * it does not touch the engine instance.
+   *
+   * A missing (`undefined`) JA4 auto-degrades to the neutral verdict
+   * (`ua_tls_consistent: true`, `confidence_adjustment: 0`); a missing IP defaults
+   * to `"low"` (§4.2). `undefined` marshals to the wasm `Option::None`.
+   */
+  passiveSignals(
+    ja4: string | undefined,
+    clientIp: string | undefined,
+    claimedUa: string | undefined,
+  ): PassiveVerdict {
+    return JSON.parse(
+      passive_signals(ja4, clientIp, claimedUa),
+    ) as PassiveVerdict
   }
 
   /** Constant-time check that `probe` is the correct nonce probe (T8). */
