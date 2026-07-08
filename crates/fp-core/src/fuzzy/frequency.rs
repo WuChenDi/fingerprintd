@@ -6,19 +6,51 @@
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, PoisonError},
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use super::component::Hash32;
+
+/// Storage contract for the per-value frequency material behind `u_i` estimation
+/// (design §9/§11).
+///
+/// The in-memory [`FrequencyTable`] is the single-instance implementation. An
+/// externalized backend (a shared counter store, a later step) lives behind the
+/// same contract, so the engine records sightings and reads counts without
+/// knowing where the frequency material is kept. Only the raw counting surface
+/// is exposed here; the smoothed `u_i` estimate lives in the scorer.
+pub trait FrequencyStore: Send + Sync {
+    /// Record one sighting of `value`.
+    fn record(&self, value: Hash32);
+
+    /// Sightings recorded for `value`.
+    fn count(&self, value: Hash32) -> u64;
+
+    /// Total scalar values recorded (the frequency denominator).
+    fn total(&self) -> u64;
+}
 
 /// `value hash → count`, with a running total, for `u_i` estimation (design §9).
 ///
 /// Updated incrementally as fingerprints are observed. The counter maps a
 /// salted value hash to its number of sightings; `total` is the number of
 /// scalar values recorded (the denominator of the frequency estimate).
+///
+/// Growth is bounded, fail-safe: an optional cap on the number of *distinct*
+/// tracked values drops a never-before-seen value once the cap is reached
+/// (already-tracked values keep counting), so the table cannot grow without
+/// limit. The default cap is generous, so a small workload is unaffected; every
+/// drop is counted via [`FrequencyTable::dropped`], never silent.
 #[derive(Debug, Default)]
 pub struct FrequencyTable {
     counts: Mutex<Counts>,
+    /// Cap on distinct tracked values; `None` is unbounded.
+    max_values: Option<usize>,
+    /// Count of new values dropped at the distinct-value cap (not silent).
+    dropped: AtomicU64,
 }
 
 /// Inner counter state guarded by the table's mutex.
@@ -31,16 +63,51 @@ struct Counts {
 }
 
 impl FrequencyTable {
-    /// Create an empty table.
+    /// Create an empty, unbounded table.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Create an empty table bounded by a cap on distinct tracked values.
+    ///
+    /// `max_frequency_values` caps how many *distinct* value hashes the table
+    /// tracks; a new value beyond the cap is dropped and counted. `None` is
+    /// unbounded.
+    pub fn with_capacity(max_frequency_values: Option<usize>) -> Self {
+        Self {
+            counts: Mutex::new(Counts::default()),
+            max_values: max_frequency_values,
+            dropped: AtomicU64::new(0),
+        }
+    }
+
     /// Record one sighting of `value`.
+    ///
+    /// An already-tracked value always increments. A never-before-seen value is
+    /// tracked unless the distinct-value cap is reached, in which case it is
+    /// dropped (not inserted, not counted toward `total`) and tallied in
+    /// [`FrequencyTable::dropped`].
     pub fn record(&self, value: Hash32) {
         let mut counts = self.lock();
-        *counts.per_value.entry(value).or_insert(0) += 1;
+        if let Some(existing) = counts.per_value.get_mut(&value) {
+            *existing += 1;
+            counts.total += 1;
+            return;
+        }
+        if let Some(cap) = self.max_values
+            && counts.per_value.len() >= cap
+        {
+            drop(counts);
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        counts.per_value.insert(value, 1);
         counts.total += 1;
+    }
+
+    /// Total new values dropped at the distinct-value cap so far.
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
     }
 
     /// Sightings recorded for `value`.
@@ -69,6 +136,20 @@ impl FrequencyTable {
     /// Lock the counter, recovering the guard if a prior holder panicked.
     fn lock(&self) -> std::sync::MutexGuard<'_, Counts> {
         self.counts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl FrequencyStore for FrequencyTable {
+    fn record(&self, value: Hash32) {
+        FrequencyTable::record(self, value);
+    }
+
+    fn count(&self, value: Hash32) -> u64 {
+        FrequencyTable::count(self, value)
+    }
+
+    fn total(&self) -> u64 {
+        FrequencyTable::total(self)
     }
 }
 
@@ -107,6 +188,30 @@ mod tests {
 
         assert!(table.u_estimate(rare) < table.u_estimate(common));
         assert!((table.u_estimate(rare) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn distinct_value_cap_drops_overflow_but_keeps_counting_tracked() {
+        let salt = Salt::random();
+        // Cap of 2 distinct values. Record two values (fills the cap), then a
+        // third distinct value that overflows, and re-record a tracked one.
+        let table = FrequencyTable::with_capacity(Some(2));
+        let a = salt.hash("a");
+        let b = salt.hash("b");
+        let c = salt.hash("c");
+
+        table.record(a);
+        table.record(b);
+        table.record(c); // over cap -> dropped
+        table.record(c); // still a new value -> dropped again
+        table.record(a); // already tracked -> counts
+
+        assert_eq!(table.count(a), 2);
+        assert_eq!(table.count(b), 1);
+        assert_eq!(table.count(c), 0); // never tracked
+        assert_eq!(table.dropped(), 2);
+        // Only the tracked sightings feed the denominator (3 = a×2 + b×1).
+        assert_eq!(table.total(), 3);
     }
 
     #[test]

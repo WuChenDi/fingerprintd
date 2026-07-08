@@ -35,6 +35,14 @@ pub trait CandidateSource: Send + Sync {
 
     /// Union of visitors across every supplied `key` — the candidate set (§4).
     fn candidates(&self, keys: &[BlockingKey]) -> HashSet<String>;
+
+    /// Over-capacity insertions dropped so far (observability, not silent).
+    ///
+    /// Defaults to `0` for backends that never drop (e.g. an unbounded external
+    /// index); the in-memory [`BlockingIndex`] overrides it with its real count.
+    fn dropped(&self) -> u64 {
+        0
+    }
 }
 
 /// Inverted index mapping each blocking key to the visitors that hash into it.
@@ -119,6 +127,10 @@ impl CandidateSource for BlockingIndex {
 
     fn candidates(&self, keys: &[BlockingKey]) -> HashSet<String> {
         BlockingIndex::candidates(self, keys)
+    }
+
+    fn dropped(&self) -> u64 {
+        BlockingIndex::dropped(self)
     }
 }
 
