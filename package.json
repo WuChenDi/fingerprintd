@@ -34,6 +34,8 @@
     }
   },
   "scripts": {
+    "dev:web": "bun run --filter '@cdlab/fingerprintd-web' dev",
+    "dev:edge": "bun run --filter '@cdlab/fingerprintd-edge' dev",
     "lint": "biome check .",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",

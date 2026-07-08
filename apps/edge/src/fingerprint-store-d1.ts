@@ -188,7 +188,9 @@ export class D1FingerprintStore implements CandidateSource {
     if (stale.length === 0) return 0
     const ids = stale.map((row) => row.visitorId)
     await this.db.batch([
-      this.db.delete(blockingIndex).where(inArray(blockingIndex.visitorId, ids)),
+      this.db
+        .delete(blockingIndex)
+        .where(inArray(blockingIndex.visitorId, ids)),
       this.db.delete(templates).where(inArray(templates.visitorId, ids)),
     ])
     return ids.length
