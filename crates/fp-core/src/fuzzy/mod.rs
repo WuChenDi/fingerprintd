@@ -110,6 +110,18 @@ pub struct FuzzyStore {
     minhash: MinHashLsh,
     /// Per-value frequency material for `u_i` estimation (§9).
     frequency: Box<dyn FrequencyStore>,
+    /// Serializes the [`FuzzyStore::identify`] read-modify-write so its
+    /// evaluate-then-observe critical section is atomic (finding M1).
+    ///
+    /// Each backend guards only its own `Mutex`, so without this the recall +
+    /// per-candidate reads (`evaluate`) and the frequency/blocking/record writes
+    /// (`observe`) of one `identify` are not one atomic step: a concurrent
+    /// `identify`'s `observe` could interleave between them and perturb the
+    /// scores non-deterministically. This `()`-guard makes the whole RMW a
+    /// single critical section. It is deliberately **not** taken by the
+    /// read-only [`FuzzyStore::score`] path, which performs no `observe` and must
+    /// stay lock-light for the stateless edge host.
+    identify_lock: std::sync::Mutex<()>,
 }
 
 impl fmt::Debug for FuzzyStore {
@@ -156,6 +168,7 @@ impl FuzzyStore {
             blocking: Box::new(BlockingIndex::with_max_block(policy.max_block)),
             minhash: MinHashLsh::new(),
             frequency: Box::new(FrequencyTable::with_capacity(policy.max_frequency_values)),
+            identify_lock: std::sync::Mutex::new(()),
         }
     }
 
@@ -173,6 +186,7 @@ impl FuzzyStore {
             blocking: Box::new(BlockingIndex::new()),
             minhash: MinHashLsh::from_seed(secret),
             frequency: Box::new(FrequencyTable::new()),
+            identify_lock: std::sync::Mutex::new(()),
         }
     }
 
@@ -198,6 +212,7 @@ impl FuzzyStore {
             blocking,
             minhash,
             frequency,
+            identify_lock: std::sync::Mutex::new(()),
         }
     }
 
