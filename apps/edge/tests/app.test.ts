@@ -264,3 +264,62 @@ describe('timestamp window (T9)', () => {
     expect((await send({})).status).toBe(401)
   })
 })
+
+describe('CORS (browser playground)', () => {
+  const ORIGIN = 'https://app.test'
+  const corsDeps = () =>
+    makeDeps({ FP_CORS_ORIGINS: `${ORIGIN}, https://other.test` })
+
+  const withOrigin = (path: string, origin: string) =>
+    new Request(`https://edge.test${path}`, {
+      method: 'GET',
+      headers: { origin },
+    })
+
+  it('answers preflight for an allowed origin with the POST method allowed', async () => {
+    const resp = await handleRequest(
+      new Request('https://edge.test/identify', {
+        method: 'OPTIONS',
+        headers: {
+          origin: ORIGIN,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type',
+        },
+      }),
+      corsDeps(),
+    )
+    expect(resp.status).toBe(204)
+    expect(resp.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    expect(resp.headers.get('access-control-allow-methods')).toContain('POST')
+  })
+
+  it('reflects an allowed origin and exposes the T9 signature headers', async () => {
+    const resp = await handleRequest(
+      withOrigin('/challenge', ORIGIN),
+      corsDeps(),
+    )
+    expect(resp.status).toBe(200)
+    expect(resp.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+    expect(
+      resp.headers.get('access-control-expose-headers')?.toLowerCase(),
+    ).toContain(SIGNATURE_HEADER)
+  })
+
+  it('does not echo an unlisted origin', async () => {
+    const resp = await handleRequest(
+      withOrigin('/challenge', 'https://evil.test'),
+      corsDeps(),
+    )
+    expect(resp.headers.get('access-control-allow-origin')).not.toBe(
+      'https://evil.test',
+    )
+  })
+
+  it('emits no CORS headers when unconfigured', async () => {
+    const resp = await handleRequest(
+      withOrigin('/challenge', ORIGIN),
+      makeDeps(),
+    )
+    expect(resp.headers.get('access-control-allow-origin')).toBeNull()
+  })
+})

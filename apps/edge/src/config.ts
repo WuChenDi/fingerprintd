@@ -34,6 +34,10 @@ export interface Env {
   FP_NONCE_TTL_SECS?: string
   /** `"1"`/`"true"` trusts edge-injected passive-signal headers. Default OFF. */
   FP_TRUST_EDGE_HEADERS?: string
+  /** Comma-separated allowed CORS origins for the browser playground, e.g.
+   *  `https://fingerprintd-web.example.workers.dev`. `*` allows any origin.
+   *  Empty/unset ⇒ no CORS headers (same-origin / server-to-server only). */
+  FP_CORS_ORIGINS?: string
 }
 
 /** Resolved, typed configuration for one Worker isolate. */
@@ -52,6 +56,9 @@ export interface EdgeConfig {
   nonceTtlSecs: number
   /** Whether edge-injected passive-signal headers are trusted. */
   trustEdgeHeaders: boolean
+  /** Allowed CORS origins for the browser playground; `['*']` allows any.
+   *  Empty ⇒ CORS disabled (no `Access-Control-*` headers emitted). */
+  corsOrigins: string[]
 }
 
 /** A dev-only salt seed used when `FP_SALT_SECRET` is unset. A real deployment
@@ -79,6 +86,15 @@ function secret(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? value : undefined
 }
 
+/** Parse a comma-separated origin list, trimming blanks. Empty ⇒ CORS off. */
+function originList(value: string | undefined): string[] {
+  if (value === undefined) return []
+  return value
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0)
+}
+
 /** Resolve the typed {@link EdgeConfig} from raw environment bindings. */
 export function resolveConfig(env: Env): EdgeConfig {
   return {
@@ -89,5 +105,6 @@ export function resolveConfig(env: Env): EdgeConfig {
     tsSkewMs: intVar(env.FP_TS_SKEW_SECS, 30) * 1000,
     nonceTtlSecs: intVar(env.FP_NONCE_TTL_SECS, 30),
     trustEdgeHeaders: flag(env.FP_TRUST_EDGE_HEADERS),
+    corsOrigins: originList(env.FP_CORS_ORIGINS),
   }
 }
