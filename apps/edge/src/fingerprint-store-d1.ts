@@ -22,22 +22,37 @@ import type { Candidate, CandidateSource } from './state'
 import type { ScoreOutcome } from './types'
 
 /**
+ * Per-recall candidate cap, mirroring `fp_core::fuzzy::blocking::DEFAULT_MAX_BLOCK`.
+ * A hot blocking key (e.g. stock iPhone Safari) unions into a huge, low-information
+ * block; leaving it unbounded means every candidate is re-scored in-isolate by WASM
+ * plus its D1 read cost (P99 blowup). Bounding recall matches the native index,
+ * whose per-block size cap drops over-capacity members (design §4). The edge has no
+ * metrics sink, so a truncated recall is surfaced via `console.warn` rather than a
+ * dropped counter — the native "not silently truncated" rule, edge-shaped.
+ */
+export const DEFAULT_MAX_BLOCK = 1024
+
+/**
  * Recall + persist over D1 via Drizzle. Construct once per isolate from the `DB`
  * binding. Holds no state itself — every method is a query against the shared
  * database.
  */
 export class D1FingerprintStore implements CandidateSource {
   private readonly db: Db
+  /** Max candidates a single `recall()` returns; over-cap blocks are truncated. */
+  private readonly maxBlock: number
 
-  constructor(d1: D1Database) {
+  constructor(d1: D1Database, maxBlock: number = DEFAULT_MAX_BLOCK) {
     this.db = getDb(d1)
+    this.maxBlock = maxBlock
   }
 
   /**
    * Union of every stored template sharing any of `blockingKeys` (design §4).
    * Empty keys ⇒ nothing to recall. `selectDistinct` collapses a visitor matched
    * by several keys to one candidate; the inner join drops any index row whose
-   * template was not (yet) written.
+   * template was not (yet) written. The union is bounded to `maxBlock`
+   * candidates; a hot key that would recall more is truncated (and warned).
    */
   async recall(blockingKeys: string[]): Promise<Candidate[]> {
     if (blockingKeys.length === 0) return []
@@ -52,6 +67,14 @@ export class D1FingerprintStore implements CandidateSource {
         eq(blockingIndex.visitorId, templates.visitorId),
       )
       .where(inArray(blockingIndex.key, blockingKeys))
+      .limit(this.maxBlock)
+    if (rows.length >= this.maxBlock) {
+      // Over-capacity block: the recall hit the cap and was truncated. Surfaced,
+      // not silent — the edge analogue of the native drop accounting.
+      console.warn(
+        `recall over capacity: ${blockingKeys.length} blocking key(s) recalled at least ${this.maxBlock} candidates; truncated to cap`,
+      )
+    }
     return rows.map((row) => ({
       visitor_id: row.visitorId,
       components: JSON.parse(row.components) as Record<string, unknown>,
