@@ -1,0 +1,34 @@
+{
+  "name": "@fingerprintd/edge",
+  "version": "0.0.0",
+  "description": "Cloudflare Worker edge deployment of the fingerprintd challenge/identify flow (TS host + Rust/WASM compute).",
+  "type": "module",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy --minify",
+    "db:gen": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "cf:localdb": "wrangler d1 migrations apply fingerprintd --local",
+    "cf:remotedb": "wrangler d1 migrations apply fingerprintd --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^5.20260707.1",
+    "@types/node": "catalog:",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.8.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.28",
+    "zod": "^4.4.3"
+  }
+}

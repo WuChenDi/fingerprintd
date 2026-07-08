@@ -1,0 +1,23 @@
+/**
+ * fingerprintd web playground — a static-assets Cloudflare Worker (no server
+ * code; the SPA is served straight from ./dist). Deploys to the same account as
+ * the edge Worker via `.github/workflows/deploy-web.yml` (or `bun run deploy`).
+ *
+ * Build first: `bun run build` produces ./dist (it needs the @fingerprintd/client
+ * dist too — `bun run --filter @fingerprintd/client build`). `wrangler deploy`
+ * then uploads the assets; there is no Worker script or binding here.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fingerprintd-web",
+  "compatibility_date": "2026-07-07",
+  "assets": {
+    "directory": "./dist",
+    // Client-side app: unmatched paths fall back to index.html.
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
