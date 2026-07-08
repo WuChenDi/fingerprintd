@@ -1,4 +1,4 @@
-# @fingerprintd/edge
+# @cdlab/fingerprintd-edge
 
 Cloudflare Worker deployment of the fingerprintd challenge/identify flow:
 a **TypeScript host** that owns I/O and routing, calling **Rust compiled to WASM**
@@ -6,7 +6,7 @@ a **TypeScript host** that owns I/O and routing, calling **Rust compiled to WASM
 deployment target for the same engine as the native Axum server
 (`crates/fingerprintd`) — a client works against **either** unchanged.
 
-## Status: PCF5 — integrated + parity-verified against the native server
+## Status — integrated + parity-verified against the native server
 
 The request surface, the WASM engine, the externalized state, **and** a
 cross-stack parity proof now run:
@@ -88,7 +88,7 @@ src/
   db/client.ts            Drizzle D1 client factory
   config.ts               resolve typed config + state bindings from env
   types.ts                wire types, kept in sync with the server + browser SDK
-  signature.ts            response-signature header names (T9)
+  signature.ts            response-signature header names
   database/               drizzle-kit-generated D1 migrations (`wrangler d1 migrations apply`)
 drizzle.config.ts         drizzle-kit config (schema -> src/database)
 wasm/                     vendored `wasm-pack --target web` build of crates/fp-wasm
@@ -108,8 +108,8 @@ secrets are read at runtime — never embedded.
 | Binding | Role | Default |
 | --- | --- | --- |
 | `FP_SALT_SECRET` (secret) | seeds the deterministic salt + MinHash family | dev placeholder |
-| `FP_PROBE_KEY` (secret) | nonce-probe key (T8); unset ⇒ probe check off | off |
-| `FP_SIGNING_KEY` (secret) | response-signing key (T9); unset ⇒ signing off | off |
+| `FP_PROBE_KEY` (secret) | nonce-probe key; unset ⇒ probe check off | off |
+| `FP_SIGNING_KEY` (secret) | response-signing key; unset ⇒ signing off | off |
 | `FP_ENFORCE_TS_WINDOW` (var) | `"1"`/`"true"` enables the timestamp window | off |
 | `FP_TS_SKEW_SECS` (var) | allowed clock skew when the window is on | 30 |
 | `FP_NONCE_TTL_SECS` (var) | nonce lifetime, advertised as `expires_in` | 30 |
@@ -222,8 +222,8 @@ deploy needs no paid plan.
 
    ```bash
    wrangler secret put FP_SALT_SECRET     # required — stable, high-entropy
-   wrangler secret put FP_PROBE_KEY       # optional — enables the nonce probe (T8)
-   wrangler secret put FP_SIGNING_KEY     # optional — enables response signing (T9)
+   wrangler secret put FP_PROBE_KEY       # optional — enables the nonce probe
+   wrangler secret put FP_SIGNING_KEY     # optional — enables response signing
    ```
 
    If `FP_PROBE_KEY` is set, rebuild the vendored WASM (`apps/edge/wasm` +

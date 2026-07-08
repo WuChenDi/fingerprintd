@@ -2,25 +2,24 @@
  * Playground flow runner.
  *
  * Drives the collect-only SDK end-to-end against a fingerprintd server and
- * returns every intermediate the UI visualizes. The four evidence lanes
- * (`stable_components` / `challenge_response` / `probe` / `ts`) come straight
- * out of the SDK's {@link Collected} — the client never derives an id, the
- * server judges.
+ * returns every intermediate the UI visualizes. The three evidence lanes
+ * (`stable_components` / `probe` / `ts`) come straight out of the SDK's
+ * {@link Collected} — the client never derives an id, the server judges.
  */
 import type {
   ChallengeResponse,
   Collected,
   IdentifyRequest,
   IdentifyResponse,
-} from '@fingerprintd/client'
+} from '@cdlab/fingerprintd-client'
 import {
   createCollector,
   getChallenge,
   identify,
   initProbe,
   verifySignature,
-} from '@fingerprintd/client'
-import wasmUrl from '@fingerprintd/client/wasm?url'
+} from '@cdlab/fingerprintd-client'
+import wasmUrl from '@cdlab/fingerprintd-client/wasm?url'
 
 /**
  * Init the WASM probe once with the Vite-resolved asset URL. Passing the URL
