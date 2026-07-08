@@ -171,6 +171,51 @@ describe('D1 fingerprint store (recall + drift)', () => {
     }
   })
 
+  it('erases a visitor: template and blocking-index rows gone, others intact (M6b)', async () => {
+    const store = new D1FingerprintStore(env.DB)
+    await store.persist(
+      outcome('new_device', 'v1'),
+      { platform: 'Linux' },
+      ['k1', 'shared'],
+      1000,
+    )
+    await store.persist(
+      outcome('new_device', 'v2'),
+      { platform: 'macOS' },
+      ['k2', 'shared'],
+      1000,
+    )
+
+    await store.erase('v1')
+
+    // v1 is gone by every one of its keys; v2 (which shared a key) is untouched.
+    expect(await store.recall(['k1'])).toEqual([])
+    expect(await store.recall(['shared'])).toEqual([
+      { visitor_id: 'v2', components: { platform: 'macOS' } },
+    ])
+    // Erasing an unknown id is an idempotent no-op.
+    await expect(store.erase('never-existed')).resolves.toBeUndefined()
+  })
+
+  it('purges templates older than the retention window (M6c)', async () => {
+    const store = new D1FingerprintStore(env.DB)
+    // A stale template (last seen at t=1000) and a fresh one (t=100000).
+    await store.persist(outcome('new_device', 'old'), { a: 1 }, ['ko'], 1000)
+    await store.persist(outcome('new_device', 'new'), { a: 2 }, ['kn'], 100_000)
+
+    // now=200000, maxAge=150000 ⇒ cutoff=50000: only `old` (1000) is stale.
+    const purged = await store.purgeOlderThan(200_000, 150_000)
+    expect(purged).toBe(1)
+    expect(await store.recall(['ko'])).toEqual([])
+    expect(await store.recall(['kn'])).toEqual([
+      { visitor_id: 'new', components: { a: 2 } },
+    ])
+
+    // A zero/negative window disables retention: nothing is purged.
+    expect(await store.purgeOlderThan(200_000, 0)).toBe(0)
+    expect(await store.recall(['kn'])).toHaveLength(1)
+  })
+
   it('does not warn when a block is under the cap', async () => {
     const store = new D1FingerprintStore(env.DB, 3)
     await store.persist(

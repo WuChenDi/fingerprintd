@@ -53,8 +53,9 @@ export interface ChallengeResponse {
  *
  * Only `nonce` and `stable_components` are always meaningful. The Worker reads
  * `probe` (T8) and `ts` (T9) only when the matching enforcement is configured;
- * otherwise they are ignored. Unknown fields (e.g. `challenge_response`) are
- * accepted and ignored, matching the server's non-strict deserialization.
+ * otherwise they are ignored. The request schema is strict (M6a/L1): any unknown
+ * top-level field is REJECTED with `400` — there is no forward-compat
+ * `challenge_response` tolerance.
  */
 export interface IdentifyRequest {
   /** The nonce previously minted by `GET /challenge`. */
@@ -68,9 +69,6 @@ export interface IdentifyRequest {
   /** Raw stable components (no nonce mixed in). Arbitrary JSON — the engine
    *  scores these but never derives an id from the client's copy. */
   stable_components: Record<string, unknown>
-  /** Freshness proof of the active challenge (PRD §5, forward-compat). Currently
-   *  ignored — NEVER a matching signal, only a liveness proof. */
-  challenge_response?: Record<string, unknown>
 }
 
 /** Passive network-signal risk summary (PRD §5). */
@@ -99,7 +97,10 @@ export interface PassiveVerdict {
 export interface IdentifyResponse {
   /** Stable device identifier (server-computed; serde-renamed from visitor_id). */
   visitorId: string
-  /** Fused match confidence in `[0.0, 1.0]`. */
+  /** Fused match confidence in `[0.0, 1.0]`. This is DECISION confidence, not
+   *  identity trust (M3): a first-ever new device can carry a HIGH confidence yet
+   *  is entirely unestablished. Consumers must key trust off `is_new_device` /
+   *  `decision`, never off `confidence` alone. */
   confidence: number
   /** Whether this device was newly recorded. */
   is_new_device: boolean
