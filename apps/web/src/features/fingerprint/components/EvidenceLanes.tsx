@@ -72,16 +72,6 @@ export function EvidenceLanes({
         </Lane>
 
         <Lane
-          title="challenge_response"
-          description={t(
-            'nonce-seeded freshness proof — never a matching signal',
-          )}
-          present={collected.challenge_response !== undefined}
-        >
-          <JsonBlock value={collected.challenge_response} />
-        </Lane>
-
-        <Lane
           title="probe"
           description={t('hex(HMAC-SHA256(key, nonce)) computed in WASM')}
           present={collected.probe !== undefined}

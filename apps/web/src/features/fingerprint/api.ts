@@ -73,9 +73,6 @@ export async function runFlow(
   }
   if (collected.ts !== undefined) request.ts = collected.ts
   if (collected.probe !== undefined) request.probe = collected.probe
-  if (collected.challenge_response !== undefined) {
-    request.challenge_response = collected.challenge_response
-  }
 
   const { result, bodyBytes, timestamp, signature } = await identify(
     baseUrl,
