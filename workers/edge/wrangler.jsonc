@@ -4,16 +4,17 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // ENV LIMIT: there is no CF account / `wrangler login` in this environment and
-  // Durable Objects + D1 are paid, so only LOCAL execution is wired here
-  // (`wrangler dev --local`, `wrangler deploy --dry-run`, and the miniflare-backed
-  // vitest state suite). A real remote deploy is deferred to a human with an
-  // account — see README "Environment limit". The `database_id` below is a
-  // placeholder; a real deploy replaces it with the id from `wrangler d1 create`.
+  // fingerprintd edge Worker. Runs with no account locally (`wrangler dev
+  // --local`, the miniflare-backed vitest suite) and deploys to Cloudflare via
+  // `.github/workflows/deploy-edge.yml` (or `bun run deploy`). SQLite-backed
+  // Durable Objects + D1 are on the Workers free plan. `database_id` below is a
+  // real D1 (from `wrangler d1 create fingerprintd`); the runtime secrets
+  // (FP_SALT_SECRET / FP_PROBE_KEY / FP_SIGNING_KEY) are Worker Secrets, never
+  // committed — set via `wrangler secret put` or the deploy workflow's sync.
   "name": "fingerprintd-edge",
   "main": "src/index.ts",
-  "compatibility_date": "2024-11-01",
-  "workers_dev": true,
+  "compatibility_date": "2026-07-07",
+  "compatibility_flags": ["nodejs_compat"],
   // Non-secret defaults for local dev. Real secrets (FP_SALT_SECRET, FP_PROBE_KEY,
   // FP_SIGNING_KEY) are set with `wrangler secret put <NAME>` / `.dev.vars`, never
   // committed. With none set the Worker mirrors a default `fingerprintd`: probe
@@ -45,8 +46,12 @@
     {
       "binding": "DB",
       "database_name": "fingerprintd",
-      "database_id": "local-fingerprintd",
-      "migrations_dir": "src/database"
+      "migrations_dir": "src/database",
+      "database_id": "af4a17c8-0884-462b-9f86-6289eaddd21c"
     }
-  ]
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
 }

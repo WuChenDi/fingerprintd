@@ -197,18 +197,22 @@ in local workerd/miniflare, loading `.dev.vars` as the secrets. No account neede
 
 ### Real Cloudflare (account holder)
 
+SQLite-backed Durable Objects + D1 are on the Workers free plan, so a test
+deploy needs no paid plan.
+
 1. **Create D1** and copy the id it prints into `wrangler.jsonc`
-   (`[[d1_databases]].database_id`, replacing the `local-fingerprintd`
-   placeholder):
+   (`d1_databases[0].database_id` — already set to a real D1; replace it for a
+   fresh account):
 
    ```bash
    wrangler d1 create fingerprintd
    ```
 
-2. **Apply migrations** to the remote database:
+2. **Apply migrations** to the remote database (the drizzle-kit output in
+   `src/database`):
 
    ```bash
-   wrangler d1 migrations apply fingerprintd
+   bun run cf:remotedb   # wrangler d1 migrations apply fingerprintd --remote
    ```
 
 3. **Set the secrets** (prompted for each value; nothing is committed):
@@ -219,18 +223,28 @@ in local workerd/miniflare, loading `.dev.vars` as the secrets. No account neede
    wrangler secret put FP_SIGNING_KEY     # optional — enables response signing (T9)
    ```
 
-   If `FP_PROBE_KEY` is set, build the browser collector (`clients/web`) with the
-   SAME key so its probe verifies (see that package's WASM build).
+   If `FP_PROBE_KEY` is set, rebuild the vendored WASM (`workers/edge/wasm` +
+   `clients/web/wasm`) with the SAME key
+   (`FP_PROBE_KEY=… wasm-pack build --target web crates/fp-wasm`, then re-vendor)
+   so the probe verifies — the committed WASM is dev-keyed.
 
-4. **Deploy.** The Durable Object migration in `wrangler.jsonc` (`[[migrations]]
-   new_sqlite_classes`) provisions the nonce class on first publish:
+4. **Deploy.** The Durable Object migration in `wrangler.jsonc`
+   (`migrations[].new_sqlite_classes`) provisions the nonce class on first publish:
 
    ```bash
-   wrangler deploy
+   bun run deploy   # wrangler deploy --minify
    ```
 
 Validate the config offline first with `bun run deploy:dry` (bundles the Worker +
 `.wasm` and resolves the bindings without publishing).
+
+### CI deploy
+
+`.github/workflows/deploy-edge.yml` runs the same flow from the Actions tab
+(manual `workflow_dispatch`, with an optional "apply remote D1 migrations"
+toggle). It needs the `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` repository
+secrets and syncs the optional `FP_SALT_SECRET` / `FP_PROBE_KEY` /
+`FP_SIGNING_KEY` Worker secrets from matching GitHub secrets (unset ones skipped).
 
 ## Environment limit
 

@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "deploy:dry": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy --minify",
     "db:gen": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
     "cf:localdb": "wrangler d1 migrations apply fingerprintd --local",

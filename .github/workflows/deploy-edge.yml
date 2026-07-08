@@ -1,0 +1,92 @@
+name: Deploy edge (Cloudflare)
+
+# Manual trigger only — deploying is explicit; CI (ci.yml) never auto-deploys.
+# Run from the Actions tab, optionally applying the remote D1 migrations first.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   deploy auth for wrangler (Workers Scripts:Edit,
+#                          D1:Edit, and Account Settings:Read on the account)
+#   CLOUDFLARE_ACCOUNT_ID  deploy target account id
+#
+# Optional Worker runtime secrets (synced AFTER deploy; unset ones are skipped,
+# so leaving them blank keeps the Worker's current value):
+#   FP_SALT_SECRET   stable, high-entropy salt seed — set this for a real deploy
+#                    (else blocking keys use a dev placeholder, not deployment-bound)
+#   FP_PROBE_KEY     enables the nonce probe (T8). If you set this, the vendored
+#                    WASM in workers/edge/wasm + clients/web/wasm MUST be rebuilt
+#                    with the SAME key (`FP_PROBE_KEY=… wasm-pack build --target
+#                    web crates/fp-wasm`, then re-vendor) — this workflow ships the
+#                    committed dev-keyed WASM, so a mismatched probe key fails.
+#   FP_SIGNING_KEY   enables response signing (T9).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Apply the remote D1 migrations before deploying'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-edge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Consumed by wrangler for every remote call (migrate / deploy / secret).
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Kept in sync with ci.yml's Bun setup.
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Bun workspace install from the repo root (one lockfile for both packages).
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Optional: apply the drizzle-kit migrations in workers/edge/src/database to
+      # the remote D1 bound in wrangler.jsonc before the code goes live.
+      - name: Apply D1 migrations (remote)
+        if: ${{ inputs.run_migrations }}
+        working-directory: workers/edge
+        run: bun run cf:remotedb
+
+      - name: Deploy
+        working-directory: workers/edge
+        run: bun run deploy
+
+      # Sync Worker runtime secrets from GitHub secrets (idempotent). Runs AFTER
+      # deploy so the Worker exists; empty GitHub secrets are skipped so an unset
+      # value never wipes an existing Worker secret.
+      - name: Sync Worker secrets
+        working-directory: workers/edge
+        env:
+          FP_SALT_SECRET: ${{ secrets.FP_SALT_SECRET }}
+          FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
+          FP_SIGNING_KEY: ${{ secrets.FP_SIGNING_KEY }}
+        run: |
+          jq -n '
+            [
+              {key: "FP_SALT_SECRET",  value: env.FP_SALT_SECRET},
+              {key: "FP_PROBE_KEY",    value: env.FP_PROBE_KEY},
+              {key: "FP_SIGNING_KEY",  value: env.FP_SIGNING_KEY}
+            ]
+            | map(select(.value != null and .value != ""))
+            | from_entries
+          ' > "$RUNNER_TEMP/edge-secrets.json"
+          if [ "$(jq 'length' "$RUNNER_TEMP/edge-secrets.json")" -eq 0 ]; then
+            echo "No Worker secrets provided — skipping sync"
+          else
+            jq 'keys' "$RUNNER_TEMP/edge-secrets.json"
+            bunx wrangler secret bulk "$RUNNER_TEMP/edge-secrets.json"
+          fi
+          rm -f "$RUNNER_TEMP/edge-secrets.json"
