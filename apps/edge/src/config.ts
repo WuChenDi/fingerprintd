@@ -41,7 +41,7 @@ export interface Env {
    *  this are purged by the scheduled cron (M6). `0`/unset ⇒ retention disabled. */
   FP_RETENTION_SECS?: string
   /** Comma-separated allowed CORS origins for the browser playground, e.g.
-   *  `https://fingerprintd-web.example.workers.dev`. `*` allows any origin.
+   *  `https://fingerprintd.pages.dev`. `*` allows any origin.
    *  Empty/unset ⇒ no CORS headers (same-origin / server-to-server only). */
   FP_CORS_ORIGINS?: string
 }

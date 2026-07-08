@@ -24,7 +24,7 @@
     "FP_TS_SKEW_SECS": "30",
     // Allowed browser CORS origins (comma-separated; `*` = any). Set to the web
     // playground deployment so it can call /challenge and /identify cross-origin.
-    "FP_CORS_ORIGINS": "https://fingerprintd-web.cdlab.workers.dev"
+    "FP_CORS_ORIGINS": "https://fingerprintd.pages.dev"
   },
   // One-time nonce store (PCF4): a Durable Object gives the atomic check-and-burn
   // that D1/KV eventual consistency cannot. Bound as `env.NONCE`.
