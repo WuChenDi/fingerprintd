@@ -21,15 +21,16 @@ pub use fp_core::{fuzzy, nonce, probe, signing};
 use axum::{
     Json, Router,
     body::Body,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    config::SecretKey,
     nonce::NonceOutcome,
     signals::{PassiveSignals, StaticIpIntel},
     signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER},
@@ -42,11 +43,13 @@ use crate::{
 /// - `GET /health` — liveness probe, always `200 OK`.
 /// - `GET /challenge` — issue a one-time nonce (PRD §5).
 /// - `POST /identify` — consume the nonce and resolve the device.
+/// - `DELETE /visitor/{id}` — GDPR erasure, admin-key gated (finding M6).
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/challenge", get(challenge))
         .route("/identify", post(identify))
+        .route("/visitor/{id}", delete(erase_visitor))
         .with_state(state)
 }
 
@@ -174,6 +177,62 @@ async fn identify(
             StatusCode::UNAUTHORIZED.into_response()
         }
     }
+}
+
+/// `DELETE /visitor/{id}` — erase a visitor from the fingerprint library (GDPR
+/// right-to-be-forgotten, finding M6, PRD §7).
+///
+/// **Fail-closed** auth:
+/// - No `admin_key` configured ⇒ the endpoint is disabled ⇒ `404 NOT_FOUND`.
+/// - `admin_key` configured but the request is missing the credential or presents
+///   a wrong one ⇒ `401 UNAUTHORIZED` (constant-time compare, [`ct_eq`]).
+/// - Authorized ⇒ erase and return `204 NO_CONTENT`.
+///
+/// Erasure is idempotent: `204` is returned even when the visitor did not exist,
+/// so the response never leaks whether a given id was present.
+async fn erase_visitor(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> StatusCode {
+    let Some(admin_key) = state.admin_key.as_deref() else {
+        // Disabled when no key is provisioned: erasure is never open.
+        return StatusCode::NOT_FOUND;
+    };
+    if !admin_authorized(&headers, admin_key) {
+        tracing::debug!("rejected erase: missing or invalid admin credential");
+        return StatusCode::UNAUTHORIZED;
+    }
+    let existed = state.matcher.erase(&id);
+    tracing::info!(existed, "erased visitor (RTBF)");
+    StatusCode::NO_CONTENT
+}
+
+/// Whether `headers` carry the correct admin credential as
+/// `Authorization: Bearer <admin_key>`, compared in constant time.
+fn admin_authorized(headers: &HeaderMap, admin_key: &SecretKey) -> bool {
+    let Some(token) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    else {
+        return false;
+    };
+    ct_eq(token.as_bytes(), admin_key.as_bytes())
+}
+
+/// Length-checked constant-time byte equality: no early return on the first
+/// differing byte, so a matching-length wrong credential reveals nothing through
+/// timing. (A length mismatch short-circuits — an accepted, standard leak.)
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Extract the client-reported user agent from the stable components, trying the
@@ -305,11 +364,16 @@ impl ProbeDescriptor {
 
 /// `POST /identify` request body.
 ///
+/// `deny_unknown_fields` (finding M6) rejects an unrecognized *top-level* key
+/// with `400`, so a caller cannot smuggle unmodeled fields; `stable_components`
+/// is a free-form [`Value`], so arbitrary *nested* component keys still pass.
+///
 /// The `probe` field is the nonce-probe response (T8): verified only when a
 /// probe key is configured, otherwise ignored. The `ts` field is the client's
 /// Unix-millisecond timestamp (T9): checked against the server clock only when
 /// `enforce_ts_window` is on, otherwise ignored.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
     nonce: String,
@@ -333,7 +397,11 @@ struct IdentifyResponse {
     /// Stable device identifier.
     #[serde(rename = "visitorId")]
     visitor_id: String,
-    /// Fused match confidence in `[0.0, 1.0]` (design §6).
+    /// Fused match confidence in `[0.0, 1.0]` (design §6). This is **decision
+    /// confidence, not identity trust** (finding M3): a first-ever `new_device`
+    /// can report a high confidence (confidently unrecognized) while its identity
+    /// is unestablished — key trust off `is_new_device` / `decision`, not this
+    /// value alone.
     confidence: f64,
     /// Whether this device was newly recorded.
     is_new_device: bool,
@@ -513,6 +581,8 @@ mod tests {
             signer: None,
             enforce_ts_window: false,
             ts_skew_ms: 30_000,
+            admin_key: None,
+            retention_ms: 0,
         };
         let router = build_router(state);
 
@@ -945,5 +1015,126 @@ mod tests {
         assert!(super::ts_in_window(2_000, 1_500, 500));
         assert!(!super::ts_in_window(999, 1_500, 500));
         assert!(!super::ts_in_window(2_001, 1_500, 500));
+    }
+
+    // --- deny_unknown_fields (M6a) ---
+
+    #[tokio::test]
+    async fn identify_rejects_unknown_top_level_field() {
+        let router = test_router();
+
+        // An unrecognized top-level key is rejected before matching (non-2xx:
+        // axum's Json extractor maps the deny_unknown_fields error to 4xx).
+        let nonce = fresh_nonce(&router).await;
+        let rejected = post_identify(
+            &router,
+            json!({
+                "nonce": nonce,
+                "ts": 1,
+                "stable_components": {"ua": "x"},
+                "challenge_response": {},
+            }),
+        )
+        .await;
+        assert!(!rejected.status().is_success());
+
+        // Arbitrary *nested* component keys are still accepted (free-form Value).
+        let nonce = fresh_nonce(&router).await;
+        let ok = post_identify(
+            &router,
+            json!({ "nonce": nonce, "ts": 1, "stable_components": {"ua": "x", "anything": 1} }),
+        )
+        .await;
+        assert_eq!(ok.status(), StatusCode::OK);
+    }
+
+    // --- GDPR erasure endpoint (M6b) ---
+
+    /// Admin credential used by the erasure-enabled test router.
+    const ADMIN_KEY: &str = "test-admin-key";
+
+    /// Build a probe-key-free router with the erasure endpoint enabled.
+    fn router_with_admin() -> Router {
+        build_router(AppState::from_config(&Config {
+            admin_key: Some(ADMIN_KEY.into()),
+            ..Config::default()
+        }))
+    }
+
+    /// Issue `DELETE /visitor/{id}`, optionally with a bearer credential.
+    async fn delete_visitor(
+        router: &Router,
+        id: &str,
+        bearer: Option<&str>,
+    ) -> axum::response::Response {
+        let mut builder = Request::builder()
+            .method("DELETE")
+            .uri(format!("/visitor/{id}"));
+        if let Some(token) = bearer {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        router
+            .clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn erase_disabled_without_admin_key() {
+        // No admin key configured → the endpoint is disabled (fail-closed 404),
+        // regardless of any supplied credential.
+        let router = test_router();
+        assert_eq!(
+            delete_visitor(&router, "v1", None).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            delete_visitor(&router, "v1", Some("anything"))
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn erase_rejects_missing_or_wrong_admin_key() {
+        let router = router_with_admin();
+        // Configured but no credential → 401.
+        assert_eq!(
+            delete_visitor(&router, "v1", None).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // Configured but wrong credential → 401.
+        assert_eq!(
+            delete_visitor(&router, "v1", Some("wrong-key"))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn erase_authorized_makes_device_new_again() {
+        let router = router_with_admin();
+
+        // Record a device, then confirm the revisit matches (record present).
+        let first = identify_with(&router, probe_components()).await;
+        let visitor = first["visitorId"].as_str().unwrap().to_string();
+        assert_eq!(first["is_new_device"], json!(true));
+        let second = identify_with(&router, probe_components()).await;
+        assert_eq!(second["is_new_device"], json!(false));
+
+        // Authorized erasure returns 204.
+        let resp = delete_visitor(&router, &visitor, Some(ADMIN_KEY)).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        // Record + blocking entries are gone → the device re-identifies as new.
+        let after = identify_with(&router, probe_components()).await;
+        assert_eq!(after["is_new_device"], json!(true));
+
+        // Idempotent: erasing again (absent now) still returns 204, no leak.
+        let again = delete_visitor(&router, &visitor, Some(ADMIN_KEY)).await;
+        assert_eq!(again.status(), StatusCode::NO_CONTENT);
     }
 }

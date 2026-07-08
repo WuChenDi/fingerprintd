@@ -12,7 +12,8 @@ use figment::{
 };
 use serde::{Deserialize, Serialize};
 
-/// A secret key loaded from configuration (the nonce-probe HMAC key, T8).
+/// A secret key loaded from configuration (the nonce-probe HMAC key T8, the
+/// GDPR-erasure admin credential M6).
 ///
 /// Wraps the raw key so it is never accidentally logged: its [`fmt::Debug`] is
 /// redacted, so `Debug`-printing the containing [`Config`] does not leak it. It
@@ -118,6 +119,23 @@ pub struct Config {
     /// counting). Fail-safe generous default. Overridable via
     /// `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES`.
     pub fuzzy_max_frequency_values: usize,
+    /// Optional pre-shared admin credential gating the GDPR erasure endpoint
+    /// `DELETE /visitor/{id}` (finding M6, PRD §7 RTBF). When set (and non-empty),
+    /// the endpoint accepts an `Authorization: Bearer <admin_key>` request and
+    /// erases the visitor. Left unset by default and **fail-closed**: with no key
+    /// the endpoint is disabled entirely (`404`), and a configured key rejects a
+    /// missing or wrong credential with `401` — erasure is never open.
+    /// Overridable via `FINGERPRINTD_ADMIN_KEY`.
+    #[serde(default)]
+    pub admin_key: Option<SecretKey>,
+    /// Compliance retention window, in seconds: the maximum age (by `last_seen`) a
+    /// visitor record is retained before a proactive background sweep purges it
+    /// (finding M6, PRD §7). `0` disables the sweep (the default), leaving
+    /// behaviour unchanged. Distinct from and additive to the lazy
+    /// `fuzzy_record_ttl_secs` eviction: this runs on a timer even without
+    /// identify traffic. Overridable via `FINGERPRINTD_RETENTION_SECS`.
+    #[serde(default)]
+    pub retention_secs: u64,
 }
 
 impl Default for Config {
@@ -136,6 +154,8 @@ impl Default for Config {
             fuzzy_record_ttl_secs: 0,
             fuzzy_max_block: crate::fuzzy::blocking::DEFAULT_MAX_BLOCK,
             fuzzy_max_frequency_values: 1_000_000,
+            admin_key: None,
+            retention_secs: 0,
         }
     }
 }
