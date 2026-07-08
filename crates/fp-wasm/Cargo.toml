@@ -11,6 +11,14 @@ publish.workspace      = true
 # host-buildable so the native `#[cfg(test)]` parity test runs without a browser.
 crate-type = ["cdylib", "rlib"]
 
+# `wasm-pack` runs `wasm-opt` on the release build with these flags. `-Oz`
+# optimizes aggressively for SIZE — behaviour-preserving, so the FUNCTIONAL drift
+# guard (edge parity + probe vector) stays the source of truth. Output is not
+# byte-reproducible across hosts, which is exactly why the guard is functional
+# rather than a byte diff. Shrinks the vendored module (~264KB → ~24KB range).
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]
+
 [dependencies]
 wasm-bindgen = "0.2"
 # The framework-free core, without its `rng` feature: the edge host uses only
