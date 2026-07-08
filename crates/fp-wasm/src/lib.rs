@@ -19,7 +19,7 @@
 //!   without a browser.
 //!
 //! - The **server-side edge engine** ([`FpEngine`]): the pure compute a stateless
-//!   Cloudflare Worker host (`workers/edge`, a later step) runs for a `/identify`
+//!   Cloudflare Worker host (`apps/edge`, a later step) runs for a `/identify`
 //!   request — blocking-key derivation, Fellegi–Sunter scoring, probe
 //!   verification, and response signing — while the host owns the I/O (nonce
 //!   Durable Object, D1 candidate index) around it. Every method delegates to
@@ -319,7 +319,7 @@ mod tests {
     /// Shared signing vector — the edge engine, keyed with the deployment's
     /// signing secret (a Worker Secret), reproduces the SAME
     /// `hex(HMAC-SHA256(key, issued_ms_be ++ body))` the native `fp_core` signer
-    /// produces. The JS side (`workers/edge/tests/handler.test.ts`) asserts this
+    /// produces. The JS side (`apps/edge/tests/handler.test.ts`) asserts this
     /// exact hex too, so the signing-secret path is byte-identical native↔edge —
     /// the response-signing analogue of the `ad83…37d0` probe vector.
     #[test]

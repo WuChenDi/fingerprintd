@@ -1,11 +1,11 @@
 //! Native half of the cross-stack parity proof (PCF5).
 //!
-//! The native `fp-core` engine and the edge Worker (`workers/edge`: Rust→WASM
+//! The native `fp-core` engine and the edge Worker (`apps/edge`: Rust→WASM
 //! compute over a Durable Object nonce + D1 candidate index) are two deployments
 //! of ONE engine. This test drives the shared vectors in
-//! `workers/edge/tests/fixtures/parity.json` through the native
+//! `apps/edge/tests/fixtures/parity.json` through the native
 //! [`FuzzyStore::identify`] path; the edge half
-//! (`workers/edge/tests/parity.workers.test.ts`) drives the SAME fixture through
+//! (`apps/edge/tests/parity.workers.test.ts`) drives the SAME fixture through
 //! the Worker. Both assert the SAME committed `expect` block, so a divergence in
 //! either stack — a changed threshold, a different salt derivation, a broken
 //! serialization boundary — fails one side against the shared reference.
@@ -61,10 +61,10 @@ struct Expect {
     confidence: f64,
 }
 
-/// The shared fixture, in the `workers/edge` tree so one file drives both stacks.
+/// The shared fixture, in the `apps/edge` tree so one file drives both stacks.
 const FIXTURE_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../workers/edge/tests/fixtures/parity.json"
+    "/../../apps/edge/tests/fixtures/parity.json"
 );
 
 #[test]

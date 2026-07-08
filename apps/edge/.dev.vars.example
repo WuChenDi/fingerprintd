@@ -16,7 +16,7 @@ FP_SALT_SECRET = "local-dev-salt-change-me"
 
 # Pre-shared nonce-probe key (T8). Set to require a correct probe on /identify;
 # leave unset/empty to keep the probe check off. Must equal the key the browser
-# collector was built with (clients/web) for a real probe to verify.
+# collector was built with (packages/client) for a real probe to verify.
 # FP_PROBE_KEY = "local-dev-probe-key"
 
 # Response-signing key (T9). Set to sign /identify bodies (x-fp-signature +
