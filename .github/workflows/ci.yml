@@ -14,7 +14,7 @@ jobs:
     name: rust (fmt + clippy + test + build + deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,7 @@ jobs:
     name: wasm (fp-wasm)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -66,7 +66,7 @@ jobs:
       run:
         working-directory: packages/client
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -90,7 +90,7 @@ jobs:
     name: "web-app (apps/web: biome + typecheck + build)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -118,7 +118,7 @@ jobs:
     name: "edge (apps/edge: vitest — router + state + parity)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -141,7 +141,7 @@ jobs:
     name: "js-sca (bun audit — workspace supply-chain)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
