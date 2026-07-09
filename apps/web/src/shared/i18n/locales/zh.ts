@@ -45,6 +45,9 @@ export const zh: Record<string, string> = {
   match: '匹配',
   review: '待审',
   new_device: '新设备',
+  'Original fingerprint (client-side)': '原始指纹（客户端）',
+  'FingerprintJS computes this hash in the browser. The SDK discards it — the server judges identity from raw evidence instead.':
+    'FingerprintJS 在浏览器中计算出该哈希；SDK 会丢弃它 —— 改由服务端依据原始证据判定身份。',
 
   // Evidence lanes
   'Collected evidence': '采集到的证据',

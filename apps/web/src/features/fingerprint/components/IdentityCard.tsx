@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from '@/shared/components/ui/card'
 import { cn } from '@/shared/lib/utils'
+import type { OriginalFingerprint } from '../api'
 import { RidgeMeter } from './RidgeMeter'
 
 const verdictAccent: Record<IdentifyResponse['decision'], string> = {
@@ -40,7 +41,13 @@ function Signal({
   )
 }
 
-export function IdentityCard({ identity }: { identity: IdentifyResponse }) {
+export function IdentityCard({
+  identity,
+  original,
+}: {
+  identity: IdentifyResponse
+  original?: OriginalFingerprint
+}) {
   const { t } = useTranslation()
 
   return (
@@ -76,6 +83,22 @@ export function IdentityCard({ identity }: { identity: IdentifyResponse }) {
             {identity.visitorId}
           </p>
         </div>
+
+        {original && (
+          <div className="space-y-1.5">
+            <span className="flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.14em] text-muted-foreground">
+              {t('Original fingerprint (client-side)')}
+            </span>
+            <p className="break-all rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 font-mono text-sm text-muted-foreground">
+              {original.visitorId}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'FingerprintJS computes this hash in the browser. The SDK discards it — the server judges identity from raw evidence instead.',
+              )}
+            </p>
+          </div>
+        )}
 
         <div>
           <Signal

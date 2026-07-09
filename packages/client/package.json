@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@fingerprintjs/botd": "^2.0.0",
-    "@fingerprintjs/fingerprintjs": "^5"
+    "@fingerprintjs/fingerprintjs": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

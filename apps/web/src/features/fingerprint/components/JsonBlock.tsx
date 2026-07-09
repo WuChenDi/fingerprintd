@@ -11,7 +11,7 @@ export function JsonBlock({
   return (
     <pre
       className={cn(
-        'max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground',
+        'max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground',
         className,
       )}
     >
