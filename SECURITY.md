@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-fingerprintd is pre-1.0 software. Only the **latest released version** receives
+Only the **latest released version** receives
 security updates; older releases are not patched — please upgrade to the most
 recent release before reporting an issue.
 
