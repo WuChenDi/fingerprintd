@@ -14,11 +14,19 @@ echo "==> cargo clean"
 cargo clean
 
 # --- TypeScript ------------------------------------------------------------
-for dir in packages/client/node_modules packages/client/dist; do
-  if [ -d "$ROOT/$dir" ]; then
-    echo "==> rm -rf $dir"
-    rm -rf "${ROOT:?}/$dir"
-  fi
+# Dependencies + build output across every workspace (root, apps/*, packages/*).
+shopt -s nullglob
+for pattern in \
+  node_modules \
+  apps/*/node_modules apps/*/dist apps/*/.wrangler \
+  packages/*/node_modules packages/*/dist; do
+  for dir in $pattern; do
+    if [ -d "$ROOT/$dir" ]; then
+      echo "==> rm -rf $dir"
+      rm -rf "${ROOT:?}/$dir"
+    fi
+  done
 done
+shopt -u nullglob
 
 echo "==> Clean complete"
