@@ -20,6 +20,7 @@ import {
   verifySignature,
 } from '@cdlab/fingerprintd-client'
 import wasmUrl from '@cdlab/fingerprintd-client/wasm?url'
+import FingerprintJS from '@fingerprintjs/fingerprintjs'
 
 /**
  * Init the WASM probe once with the Vite-resolved asset URL. Passing the URL
@@ -45,12 +46,24 @@ export interface SignatureInfo {
   valid?: boolean
 }
 
+/**
+ * The client-side FingerprintJS verdict the SDK deliberately DISCARDS (§4.4).
+ * Surfaced here only so the playground can contrast a naive "trust the browser
+ * hash" fingerprint against the server-authoritative visitorId.
+ */
+export interface OriginalFingerprint {
+  /** FingerprintJS's own `visitorId` hash — never sent to the server. */
+  visitorId: string
+}
+
 /** Everything a single flow run produces. */
 export interface FlowResult {
   challenge: ChallengeResponse
   collected: Collected
   identity: IdentifyResponse
   signature: SignatureInfo
+  /** The discarded client-side FingerprintJS verdict, kept for comparison. */
+  original?: OriginalFingerprint
 }
 
 /**
@@ -64,7 +77,27 @@ export async function runFlow(
   await ensureProbe()
 
   const challenge = await getChallenge(baseUrl)
-  const collected = await createCollector()(challenge)
+
+  // Capture FingerprintJS's own visitorId as a side effect of the SDK's stable
+  // collection: the injected loader wraps the real agent so we observe the hash
+  // the SDK throws away, without a second FingerprintJS pass or altering what is
+  // sent to the server (only `stable_components` still ships).
+  let original: OriginalFingerprint | undefined
+  const collector = createCollector({
+    fingerprint: {
+      loadFingerprint: async () => {
+        const agent = await FingerprintJS.load()
+        return {
+          get: async () => {
+            const res = await agent.get()
+            original = { visitorId: res.visitorId }
+            return res
+          },
+        }
+      },
+    },
+  })
+  const collected = await collector(challenge)
 
   const request: IdentifyRequest = {
     nonce: challenge.nonce,
@@ -90,5 +123,5 @@ export async function runFlow(
     )
   }
 
-  return { challenge, collected, identity: result, signature: info }
+  return { challenge, collected, identity: result, signature: info, original }
 }

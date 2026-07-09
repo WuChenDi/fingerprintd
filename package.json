@@ -26,7 +26,7 @@
       "apps/*"
     ],
     "catalog": {
-      "@biomejs/biome": "^2.5.2",
+      "@fingerprintjs/fingerprintjs": "^5",
       "@types/node": "^26.1.0",
       "typescript": "^6.0.3",
       "vitest": "^4.1.10",
@@ -34,6 +34,7 @@
     }
   },
   "scripts": {
+    "dev": "bun run --filter=./apps/* dev",
     "dev:web": "bun run --filter '@cdlab/fingerprintd-web' dev",
     "dev:edge": "bun run --filter '@cdlab/fingerprintd-edge' dev",
     "lint": "biome check .",
@@ -45,6 +46,6 @@
     "prepare": "bun run --filter=./packages/* build"
   },
   "devDependencies": {
-    "@biomejs/biome": "catalog:"
+    "@biomejs/biome": "^2.5.2"
   }
 }

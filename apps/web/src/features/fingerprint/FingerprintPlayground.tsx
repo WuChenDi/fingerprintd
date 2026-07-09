@@ -25,7 +25,12 @@ export function FingerprintPlayground() {
               {error}
             </div>
           )}
-          {result && <IdentityCard identity={result.identity} />}
+          {result && (
+            <IdentityCard
+              identity={result.identity}
+              original={result.original}
+            />
+          )}
         </div>
 
         <div className="min-w-0 space-y-6">
