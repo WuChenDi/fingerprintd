@@ -1,0 +1,127 @@
+# fingerprintd usage guide for AI agents
+
+`fingerprintd` is a server-authoritative device-fingerprinting service for
+anti-fraud and anti-automation. The client only collects evidence; the server
+issues a one-time challenge, fuzzy-matches the evidence against its fingerprint
+library, fuses passive network signals, and returns `visitorId` + `confidence` +
+`decision`. The identity is never computed on the client, so it cannot be forged
+or replayed.
+
+Primary docs:
+
+- README: https://github.com/WuChenDi/fingerprintd/blob/main/README.md
+- Design spec: https://github.com/WuChenDi/fingerprintd/blob/main/DESIGN.md
+- Repository: https://github.com/WuChenDi/fingerprintd
+
+## What it is
+
+- One compute engine (`crates/fp-core`), two deployment targets: a native Axum
+  server (`crates/fingerprintd`) and a Cloudflare Worker (`apps/edge`, running
+  `fp-core` compiled to WASM). A client works against either unchanged.
+- A browser SDK (`@cdlab/fingerprintd-client`) wraps FingerprintJS/BotD, computes
+  the nonce freshness probe in WASM, and submits — it never derives an id.
+
+## The flow
+
+1. `GET /challenge` — the server mints a one-time nonce (short TTL, single-use)
+   and returns it plus the collection plan.
+2. The client collects `stable_components` (canvas / webgl / fonts / audio /
+   screen / UA …, with NO nonce mixed in — this is the identity-matching input),
+   and optionally a `probe = hex(HMAC-SHA256(key, nonce))` computed in WASM (a
+   freshness proof, never a matching signal).
+3. `POST /identify { nonce, stable_components, probe?, ts? }` — the server burns
+   the nonce (replay protection), recalls candidates by blocking keys, scores them
+   with the Fellegi–Sunter model, fuses passive JA4/IP signals, and returns the
+   identity.
+
+## Endpoints
+
+Both stacks serve the same wire contract:
+
+- `GET /health` — liveness (`200 OK`).
+- `GET /challenge` — issue a one-time nonce challenge.
+- `POST /identify` — compute `visitorId` + `confidence` + `decision`. The request
+  body is `deny_unknown_fields`: an unexpected top-level key is rejected `400`. A
+  reused/expired nonce, or a failed enforced probe/timestamp check, returns `401`.
+- `DELETE /visitor/{id}` — GDPR erasure. Gated by `admin_key` (route disabled when
+  unset); idempotent (`204` even if the visitor did not exist).
+
+`/identify` returns:
+
+```json
+{
+  "visitorId": "string",
+  "confidence": 0.0,
+  "decision": "match | review | new_device",
+  "is_new_device": false,
+  "collision_risk": false,
+  "signals": { "ua_tls_consistent": true, "ip_risk": "low | medium | high" }
+}
+```
+
+`confidence` is DECISION confidence, not identity trust: a brand-new device
+resolves as `new_device` with high confidence. Read `is_new_device` / `decision`
+for identity trust, not `confidence` alone.
+
+## Run the native server
+
+```bash
+cargo run -p fingerprintd                                   # 127.0.0.1:8080
+FINGERPRINTD_BIND_ADDR=0.0.0.0:9000 cargo run -p fingerprintd
+curl -i http://127.0.0.1:8080/health
+```
+
+Log level is `RUST_LOG` (default `info`).
+
+## Call it from a browser
+
+```ts
+import { createCollector, run } from '@cdlab/fingerprintd-client'
+
+const { identity } = await run({
+  baseUrl: 'https://fp.example.com',
+  collect: createCollector(),   // FingerprintJS + BotD + WASM probe
+})
+```
+
+## Configuration
+
+Layered, increasing priority: built-in defaults → `fingerprintd.toml` →
+`FINGERPRINTD_`-prefixed environment variables. Native-server keys:
+
+- `FINGERPRINTD_BIND_ADDR` (default `127.0.0.1:8080`) — listen address.
+- `FINGERPRINTD_NONCE_TTL_SECS` (default `30`) — one-time nonce lifetime.
+- `FINGERPRINTD_PROBE_KEY` (unset) — HMAC key enabling nonce-probe verification.
+- `FINGERPRINTD_RESPONSE_SIGNING_KEY` (unset) — HMAC key enabling `/identify`
+  response signatures (`x-fp-timestamp` + `x-fp-signature`).
+- `FINGERPRINTD_ENFORCE_TS_WINDOW` (default `false`) + `FINGERPRINTD_TS_SKEW_SECS`
+  (default `30`) — request timestamp window.
+- `FINGERPRINTD_ADMIN_KEY` (unset) — Bearer key gating `DELETE /visitor/{id}`.
+- `FINGERPRINTD_RETENTION_SECS` (default `0`, disabled) — evict records past this age.
+- `FINGERPRINTD_FUZZY_MAX_RECORDS` (default `1000000`) — max distinct visitors.
+- `FINGERPRINTD_FUZZY_RECORD_TTL_SECS` (default `0`, disabled) — evict unseen records.
+- `FINGERPRINTD_FUZZY_MAX_BLOCK` (default `1024`) — per-block visitor cap.
+- `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` (default `1000000`) — tracked `u_i` value cap.
+
+The `probe_key` / `response_signing_key` / `admin_key` controls are fail-closed and
+off by default — each activates only once its key is set. The capacity bounds apply
+to the native server only; the stateless edge is per-request. The native store is
+process-local (a restart re-mints devices); use the edge (Durable Object + D1) or an
+external store behind the `NonceStore` / `FingerprintStore` / `CandidateSource`
+traits for a persistent, stable `visitorId`.
+
+## Trust boundaries (do not misreport as vulnerabilities)
+
+- Passive signals (JA4/IP) are read server-side from the connection, never from the
+  client body, and only when the deployment trusts the edge (`trust_edge_headers`).
+- The probe and response-signing keys embedded in client WASM/JS are defense in
+  depth, not decisive; extracting them is expected. The one-time nonce and TLS are
+  the primary guarantees. An L3 adversary forging a single signal is a documented
+  limitation.
+
+## Design
+
+`DESIGN.md` is the authoritative spec: architecture (§1–§9) and fuzzy-matching
+engine (§1–§12). Source doc-comments reference its sections as `architecture §N` /
+`fuzzy-matching §N`. Read it before proposing changes to the matching model, the
+challenge-response split, the passive-signal trust boundary, or the HTTP contract.

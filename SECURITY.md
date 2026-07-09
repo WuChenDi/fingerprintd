@@ -38,8 +38,8 @@ This opens a private channel visible only to the maintainers and you.
 ## Scope and threat model
 
 fingerprintd is an anti-fraud device-identification service; its security model is
-documented in [`docs/architecture.md §2`](docs/architecture.md#2-goals-and-threat-model)
-and [`§4`](docs/architecture.md#4-architecture-challenge-response--server-side-fusion).
+documented in [`DESIGN.md` architecture §2](DESIGN.md#2-goals-and-threat-model)
+and [`§4`](DESIGN.md#4-architecture-challenge-response--server-side-fusion).
 Please keep reports consistent with that model:
 
 - The service does **not** claim unbreakable defense. An L3 adversary forging any

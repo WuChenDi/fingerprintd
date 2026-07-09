@@ -1,5 +1,5 @@
 //! In-memory storage layer for the weighted fuzzy-matching engine
-//! (docs/fuzzy-matching.md §3/§4/§9/§11).
+//! (DESIGN.md fuzzy-matching §3/§4/§9/§11).
 //!
 //! This is the storage substrate only — it holds the data model, the blocking
 //! indexes for candidate generation, and the frequency material for parameter
