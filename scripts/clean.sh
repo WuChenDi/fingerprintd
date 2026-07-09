@@ -9,9 +9,13 @@ cd "$ROOT"
 
 # --- Rust ------------------------------------------------------------------
 # shellcheck source=/dev/null
-source "$HOME/.cargo/env"
-echo "==> cargo clean"
-cargo clean
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+if command -v cargo >/dev/null 2>&1; then
+  echo "==> cargo clean"
+  cargo clean
+else
+  echo "==> skip cargo clean (cargo not found)"
+fi
 
 # --- TypeScript ------------------------------------------------------------
 # Dependencies + build output across every workspace (root, apps/*, packages/*).
