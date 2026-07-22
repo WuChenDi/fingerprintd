@@ -137,6 +137,37 @@ jobs:
         working-directory: apps/edge
         run: bun run test
 
+  checkin-risk:
+    name: "checkin-risk (apps/checkin-risk: biome + typecheck + test + build)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Single workspace lockfile lives at the repo root (mirror the edge job).
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome check
+        working-directory: apps/checkin-risk
+        run: bunx @biomejs/biome check .
+
+      - name: Typecheck
+        working-directory: apps/checkin-risk
+        run: bun run typecheck
+
+      # assess + risk-engine + store + velocity-do + integration, node + workers
+      # pools via @cloudflare/vitest-pool-workers (miniflare); fails on any failure.
+      - name: Test (vitest — node + workers pools)
+        working-directory: apps/checkin-risk
+        run: bun run test
+
+      - name: Build (wrangler dry-run)
+        working-directory: apps/checkin-risk
+        run: bun run build
+
   js-sca:
     name: "js-sca (bun audit — workspace supply-chain)"
     runs-on: ubuntu-latest

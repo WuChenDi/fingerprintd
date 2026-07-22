@@ -1,0 +1,60 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // check-in risk Worker. Runs with no account locally (`wrangler dev --local`,
+  // the miniflare-backed vitest suite). The storage layer (CHECKIN-002) binds
+  // the D1 event log + a Durable Object for hot velocity counters; both are
+  // optional at runtime so the Worker also runs unbound. The rule engine
+  // (CHECKIN-003) and the /assess endpoint (CHECKIN-004) build on this.
+  "name": "checkin-risk",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-07",
+  "compatibility_flags": ["nodejs_compat"],
+  // Non-secret defaults for local dev. Retention is off by default: set
+  // CHECKIN_RETENTION_SECS > 0 to have the scheduled cron purge old events.
+  "vars": {
+    "CHECKIN_RETENTION_SECS": "0"
+  },
+  // Hot atomic velocity counters (device fan-out / IP velocity): a Durable
+  // Object gives the serialized read-prune-write that a D1 COUNT(DISTINCT) scan
+  // per request cannot afford. Bound as `env.VELOCITY`.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VELOCITY",
+        "class_name": "VelocityDurableObject"
+      }
+    ]
+  },
+  // SQLite-backed Durable Object storage for the velocity class.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["VelocityDurableObject"]
+    }
+  ],
+  // Check-in event log, bound as `env.DB`. Migrations live in ./src/database
+  // (drizzle-kit generate; applied with `wrangler d1 migrations apply`).
+  // `database_id` is a placeholder — a real D1 (from `wrangler d1 create`) is
+  // provisioned by a human with a CF account; local dev/tests need none.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "checkin-risk",
+      "migrations_dir": "src/database",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  // Retention purge: the `scheduled` handler in src/index.ts runs daily at 03:00
+  // UTC, deleting events older than CHECKIN_RETENTION_SECS (0/unset ⇒ no-op).
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
