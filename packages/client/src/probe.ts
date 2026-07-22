@@ -1,8 +1,8 @@
 /**
- * WASM nonce-probe loader (TC5).
+ * WASM nonce-probe loader.
  *
  * Wraps the wasm-bindgen `fp-wasm` glue (vendored under `../wasm`) so the full
- * collector can compute the T8 probe `hex(HMAC-SHA256(key, nonce))` client-side.
+ * collector can compute the nonce probe `hex(HMAC-SHA256(key, nonce))` client-side.
  * The transform is byte-for-byte identical to the server verifier
  * (`crates/fingerprintd/src/probe.rs`); the shared parity vector is asserted in
  * `test/probe.test.ts`.

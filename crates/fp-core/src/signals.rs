@@ -25,7 +25,7 @@
 //! **Trust boundary (architecture §4.2 security requirement):** the JA4 signal is trusted
 //! only when injected by the Cloudflare edge; the origin must strip any
 //! client-supplied copy before this module runs. Enforcing that strip is handler
-//! /edge wiring (T7); this module only consumes whatever trusted values it is given.
+//! /edge wiring; this module only consumes whatever trusted values it is given.
 //!
 //! **Scope caveats:** inputs here are mocked. Real JA4 needs Cloudflare Bot
 //! Management (may be absent → degrade), and the [`IpIntel`] static classifier is

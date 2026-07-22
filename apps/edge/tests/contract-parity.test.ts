@@ -8,7 +8,7 @@ import {
   SIGNATURE_TIMESTAMP_HEADER as EDGE_SIGNATURE_TIMESTAMP_HEADER,
 } from '../src/signature'
 
-// L8 — cross-stack signing-contract parity (LIGHT).
+// Cross-stack signing-contract parity (LIGHT).
 //
 // The signing header names are triplicated: `apps/edge/src/signature.ts`,
 // `packages/client/src/signature.ts`, and the Rust wire literals

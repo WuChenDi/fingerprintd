@@ -1,5 +1,5 @@
 /**
- * Host state for the check-in risk Worker (CHECKIN-004).
+ * Host state for the check-in risk Worker.
  *
  * Mirrors `apps/edge/src/state.ts`: the `/checkin/assess` handler depends on an
  * async {@link CheckinStore} interface, never on the concrete D1 wrapper, so the
@@ -20,7 +20,7 @@ import type { AggregateResult, CheckinEvent } from './checkin-store-d1'
 export interface CheckinStore {
   /** Append one check-in observation. No-op in the empty fallback. */
   record(event: CheckinEvent): Promise<void>
-  /** Windowed PLAN-001 aggregates for the `(account, device, ip)` triple as of
+  /** Windowed aggregates for the `(account, device, ip)` triple as of
    *  `now` (Unix ms). All-zero in the empty fallback. */
   getAggregates(
     accountId: string,

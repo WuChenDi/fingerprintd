@@ -7,7 +7,7 @@
  * request field is `probe` (a hex string), NOT `probe_response`.
  */
 
-/** Advertised nonce-probe transform (T8). Present in `GET /challenge` only when
+/** Advertised nonce-probe transform. Present in `GET /challenge` only when
  *  the server has a probe key configured; omitted otherwise. The client computes
  *  `encoding(alg(shared_key, input))` — i.e. `hex(HMAC-SHA256(key, nonce))` — and
  *  echoes it as {@link IdentifyRequest.probe}. The shared key is never advertised. */
@@ -25,7 +25,7 @@ export interface ChallengeProbe {
   /** Nonce used to seed the rendered challenge (equals the top-level nonce). */
   seed: string
   /** Probe targets to render, e.g. `['canvas', 'audio']`. The server still
-   *  advertises these, but the client no longer consumes them (audit L1 — the
+   *  advertises these, but the client no longer consumes them (the
    *  active-challenge collector was removed; the `probe` field is the live
    *  freshness control). Parsed and ignored. */
   targets: string[]
@@ -55,16 +55,16 @@ export interface ChallengeResponse {
  * `POST /identify` request body.
  *
  * Only `nonce` and `stable_components` are always meaningful. The server reads
- * `probe` (T8) and `ts` (T9) only when the matching enforcement is configured;
+ * `probe` and `ts` only when the matching enforcement is configured;
  * otherwise they are ignored.
  */
 export interface IdentifyRequest {
   /** The nonce previously minted by `GET /challenge`. */
   nonce: string
-  /** Client timestamp in Unix milliseconds (T9). Checked only when the server's
+  /** Client timestamp in Unix milliseconds. Checked only when the server's
    *  timestamp window is enforced; a missing/out-of-window value then yields 401. */
   ts?: number
-  /** Nonce-probe response `hex(HMAC-SHA256(shared_key, nonce))` (T8). Verified
+  /** Nonce-probe response `hex(HMAC-SHA256(shared_key, nonce))`. Verified
    *  only when the server has a probe key; a missing/wrong value then yields 401. */
   probe?: string
   /** Raw stable components (no nonce mixed in). Arbitrary JSON — the server
@@ -87,7 +87,7 @@ export interface IdentifyResponse {
   /** Fused match confidence in `[0.0, 1.0]`. This is DECISION confidence, not
    *  identity trust: a first-ever new device can carry high `confidence` yet is
    *  unestablished — consumers key trust off `is_new_device` / `decision`, not
-   *  this number (M3). */
+   *  this number. */
   confidence: number
   /** Whether this device was newly recorded. */
   is_new_device: boolean

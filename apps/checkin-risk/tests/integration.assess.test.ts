@@ -1,11 +1,11 @@
 /**
- * End-to-end integration coverage for `POST /checkin/assess` (CHECKIN-005).
+ * End-to-end integration coverage for `POST /checkin/assess`.
  *
  * Drives the full handler -> store -> engine -> response path over the real
  * Hono app from `createApp`, injecting a fake {@link CheckinStore} that returns
  * controlled {@link AggregateResult} values (the store's own D1 query logic has
  * dedicated coverage in `checkin-store.workers.test.ts`). Each representative
- * business scenario from PLAN-001 asserts the decision/verdict BAND the merged
+ * business scenario asserts the decision/verdict BAND the merged
  * engine actually produces — expectations are computed here from the committed
  * `defaultProfiles` weights/bands, never from loose prose, so this test tracks
  * the real config rather than a copy of it.
@@ -162,7 +162,7 @@ describe('POST /checkin/assess — integration (handler -> store -> engine)', ()
     const body = buildBody({
       identify: buildIdentify({ visitorId: 'vis-farm' }),
     })
-    // 0.6: a single strong signal is challenged, not denied (PLAN-001).
+    // 0.6: a single strong signal is challenged, not denied.
     const json = await assess(HIGH_FANOUT, body)
     expect(json.decision).toBe('challenge')
     expectVerdict(json, ['DEVICE_FARM'], 'vis-farm')
@@ -175,7 +175,7 @@ describe('POST /checkin/assess — integration (handler -> store -> engine)', ()
         signals: { ua_tls_consistent: true, ip_risk: 'high' },
       }),
     })
-    // 0.6 + 0.3 = 0.9 >= deny(0.7) — how a real 群控 farm reaches deny.
+    // 0.6 + 0.3 = 0.9 >= deny(0.7) — how a real device farm reaches deny.
     const json = await assess(HIGH_FANOUT, body)
     expectVerdict(json, ['DEVICE_FARM', 'DATACENTER_IP'], 'vis-farm-dc')
   })
@@ -194,7 +194,7 @@ describe('POST /checkin/assess — integration (handler -> store -> engine)', ()
     const body = buildBody({
       identify: buildIdentify({ visitorId: 'vis-nat' }),
     })
-    // 0.3 < challenge(0.35): conservative on corp/campus NAT (PLAN-001 Risks).
+    // 0.3 < challenge(0.35): conservative on corp/campus NAT.
     const json = await assess(HIGH_IP_COUNT, body)
     // KEY PROPERTY: a benign shared egress must not be denied.
     expect(json.decision).not.toBe('deny')

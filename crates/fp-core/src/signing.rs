@@ -50,7 +50,7 @@ impl ResponseSigner {
     /// verifying client recomputes the same tag over the received timestamp and
     /// body. HMAC accepts a key of any length, so keying is infallible in
     /// practice; `None` is returned only on the unreachable keying error rather
-    /// than panicking (Lock 6).
+    /// than panicking.
     pub fn sign(&self, issued_ms: u64, body: &[u8]) -> Option<String> {
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).ok()?;
         mac.update(&issued_ms.to_be_bytes());

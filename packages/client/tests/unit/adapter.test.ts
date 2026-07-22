@@ -1,5 +1,5 @@
 /**
- * Unit tests for the FingerprintJS → server-schema adapter (audit H5, part a).
+ * Unit tests for the FingerprintJS → server-schema adapter.
  *
  * Fixtures are FJS-SHAPED: real FJS key names with values wrapped as
  * `{ value, duration }`. The assertions pin the three transforms the server
@@ -65,7 +65,7 @@ describe('adaptFingerprintComponents', () => {
 
   it('drops a category/numeric mapped field whose value is an object', () => {
     // Real FJS webgl/canvas values are objects — the server cannot store them,
-    // so they drop (H5 scope: wrapper+key mismatch, not canonicalization).
+    // so they drop (wrapper+key mismatch, not canonicalization).
     const out = adaptFingerprintComponents({
       webGlBasics: { value: { version: 'WebGL 2.0' }, duration: 5 },
       canvas: { value: { winding: true }, duration: 9 },

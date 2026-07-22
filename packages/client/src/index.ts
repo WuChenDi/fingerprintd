@@ -49,10 +49,10 @@ export type {
 export interface RunOptions {
   /** Base URL of the fingerprintd server (e.g. `https://fp.example.com`). */
   baseUrl: string
-  /** Collector producing the evidence to submit. Injected so TC2/TC3/TC5 wire
-   *  in a real collector without changing this orchestration. */
+  /** Collector producing the evidence to submit. Injected so a real collector
+   *  wires in without changing this orchestration. */
   collect: Collector
-  /** Shared response-signature key (T9). When present, {@link run} verifies the
+  /** Shared response-signature key. When present, {@link run} verifies the
    *  `/identify` response signature. See the shared-secret caveat in
    *  `signature.ts` — embedding this in browser code is only shallow depth. */
   signingKey?: Uint8Array

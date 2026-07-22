@@ -51,7 +51,7 @@ use self::{
     record::{FingerprintRecord, RecordStore},
 };
 
-/// Capacity / TTL bounds for the in-memory fuzzy backends (finding H2).
+/// Capacity / TTL bounds for the in-memory fuzzy backends.
 ///
 /// The in-memory store grows with every distinct visitor and value; left
 /// unbounded that is an availability risk. This policy caps that growth with
@@ -111,7 +111,7 @@ pub struct FuzzyStore {
     /// Per-value frequency material for `u_i` estimation (§9).
     frequency: Box<dyn FrequencyStore>,
     /// Serializes the [`FuzzyStore::identify`] read-modify-write so its
-    /// evaluate-then-observe critical section is atomic (finding M1).
+    /// evaluate-then-observe critical section is atomic.
     ///
     /// Each backend guards only its own `Mutex`, so without this the recall +
     /// per-candidate reads (`evaluate`) and the frequency/blocking/record writes
@@ -151,7 +151,7 @@ impl FuzzyStore {
     }
 
     /// Build an empty store (random salt) whose in-memory backends enforce the
-    /// given capacity / TTL [`EvictionPolicy`] (finding H2).
+    /// given capacity / TTL [`EvictionPolicy`].
     ///
     /// [`FuzzyStore::new`] delegates here with the default (generous) policy, so
     /// a fresh small workload is unaffected while growth is bounded. The
@@ -259,8 +259,8 @@ impl FuzzyStore {
     }
 
     /// Proactively purge every record older than `max_age_ms` (by `last_seen`)
-    /// relative to `now_ms`, returning the number removed (compliance retention,
-    /// finding M6). Runs under the [`FuzzyStore::identify`] lock so it is atomic
+    /// relative to `now_ms`, returning the number removed (compliance
+    /// retention). Runs under the [`FuzzyStore::identify`] lock so it is atomic
     /// against a concurrent `identify`, and is additive to the lazy TTL sweep in
     /// [`FuzzyStore::observe`] — it ages records out even without observe traffic.
     ///

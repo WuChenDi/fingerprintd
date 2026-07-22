@@ -48,7 +48,7 @@ function fakeBotd(
 }
 
 describe('createFingerprintCollector', () => {
-  it('ADAPTS FingerprintJS components into the server schema (audit H5)', async () => {
+  it('ADAPTS FingerprintJS components into the server schema', async () => {
     const components = {
       fonts: { value: ['Arial'], duration: 3 },
       timezone: { value: 'UTC', duration: 1 },

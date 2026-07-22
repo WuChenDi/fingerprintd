@@ -1,10 +1,10 @@
 /**
- * Pure check-in risk scoring (CHECKIN-003, PLAN-001 §Decision logic).
+ * Pure check-in risk scoring.
  *
  * {@link assess} fuses fingerprintd hard signals with the account/device/IP/time
  * aggregates into an explainable allow/challenge/deny verdict. It performs NO
- * I/O — deterministic given its inputs — so the storage layer (CHECKIN-002) and
- * the endpoint (CHECKIN-004) stay separately testable.
+ * I/O — deterministic given its inputs — so the storage layer and
+ * the endpoint stay separately testable.
  */
 
 import type { Aggregates, ReasonCode, ThresholdProfile } from './risk-config'
@@ -22,7 +22,7 @@ const REASON_DETAIL: Record<ReasonCode, string> = {
 }
 
 /**
- * Score a check-in request into a verdict. Two stages (PLAN-001): cheap
+ * Score a check-in request into a verdict. Two stages: cheap
  * fingerprintd hard-signals first, then aggregates. Every fired trigger adds its
  * configured weight and appends a reason; the summed risk is clamped to `[0,1]`
  * and banded into a decision/verdict pair.

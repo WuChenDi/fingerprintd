@@ -5,10 +5,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // check-in risk Worker. Runs with no account locally (`wrangler dev --local`,
-  // the miniflare-backed vitest suite). The storage layer (CHECKIN-002) binds
+  // the miniflare-backed vitest suite). The storage layer binds
   // the D1 event log + a Durable Object for hot velocity counters; both are
   // optional at runtime so the Worker also runs unbound. The rule engine
-  // (CHECKIN-003) and the /assess endpoint (CHECKIN-004) build on this.
+  // and the /assess endpoint build on this.
   "name": "checkin-risk",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-07",

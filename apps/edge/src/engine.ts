@@ -95,7 +95,7 @@ export class EdgeEngine {
     ) as PassiveVerdict
   }
 
-  /** Constant-time check that `probe` is the correct nonce probe (T8). */
+  /** Constant-time check that `probe` is the correct nonce probe. */
   verifyProbe(nonce: string, probe: string): boolean {
     return this.inner.verify_probe(nonce, probe)
   }
@@ -107,7 +107,7 @@ export class EdgeEngine {
   }
 
   /** `hex(HMAC-SHA256(signing_key, issued_ms_be ++ body))` over the exact
-   *  response bytes (T9). `issuedMs` is Unix milliseconds. */
+   *  response bytes. `issuedMs` is Unix milliseconds. */
   sign(issuedMs: number, body: Uint8Array): string {
     return this.inner.sign(BigInt(issuedMs), body)
   }

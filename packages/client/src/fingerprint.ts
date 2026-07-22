@@ -9,7 +9,7 @@
  *    whatever the server returns from `/identify`.
  *  - BotD signals are merged under a `botd` sub-object of `stable_components`.
  *  - This module emits ONLY `stable_components`. The nonce-seeded `probe` is a
- *    SEPARATE freshness proof (TC4) and must never become a matching signal — so
+ *    SEPARATE freshness proof and must never become a matching signal — so
  *    it is absent here.
  *
  * TREE-SHAKING: kept in its own module (not `collect.ts`) so importing the
@@ -58,7 +58,7 @@ export interface FingerprintCollectorDeps {
  * The returned collector ignores the challenge (the stable half is nonce-free
  * by design — architecture §4.1) and produces only `stable_components`:
  *  - every FingerprintJS component, ADAPTED to the server matching schema
- *    (audit H5 — {@link adaptFingerprintComponents} unwraps the FJS
+ *    ({@link adaptFingerprintComponents} unwraps the FJS
  *    `{ value, duration }` wrapper and renames keys; a verbatim spread would be
  *    silently dropped by the server matcher), and
  *  - the BotD detection result + raw signals under a `botd` key (BotD is not
@@ -85,12 +85,12 @@ export function createFingerprintCollector(
     }
 
     // Adapt FJS components to the server matching schema before they become
-    // stable_components (audit H5); botd is merged untouched under its own key.
+    // stable_components; botd is merged untouched under its own key.
     const stable_components: Record<string, unknown> = {
       ...adaptFingerprintComponents(components),
       botd,
     }
-    // ONLY stable_components — the nonce probe is TC4's separate freshness proof
+    // ONLY stable_components — the nonce probe is a separate freshness proof
     // and must never ride along as a matching signal.
     return { stable_components }
   }

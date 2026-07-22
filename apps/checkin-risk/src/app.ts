@@ -3,9 +3,9 @@
  *
  * State-free and dependency-injected — mirroring `apps/edge/src/app.ts` — so it
  * is unit-testable without the Workers runtime. It serves `GET /health` plus
- * `POST /checkin/assess` (CHECKIN-004): validate the request, persist the event,
- * derive the PLAN-001 aggregates, and score them through the pure rule engine.
- * The storage layer (CHECKIN-002) and threshold profiles (CHECKIN-003) are
+ * `POST /checkin/assess`: validate the request, persist the event,
+ * derive the aggregates, and score them through the pure rule engine.
+ * The storage layer and threshold profiles are
  * injected via {@link Deps}; `index.ts` wires the D1 store per isolate, tests
  * supply fakes. Both deps are optional so the app runs on empty fallbacks.
  */
@@ -54,14 +54,14 @@ export function createApp(deps: Deps): Hono {
     if (!parsed.ok) return c.json({ error: parsed.error }, 400)
     const req = parsed.value
 
-    // Edge-observed context — NEVER read from the body (PLAN-001: ip/ts are
-    // observed edge-side). Mirror the edge Worker's cf-connecting-ip extraction;
+    // Edge-observed context — NEVER read from the body (ip/ts are observed
+    // edge-side). Mirror the edge Worker's cf-connecting-ip extraction;
     // absent (bare `wrangler dev` / test) it degrades to an empty IP.
     const ip = c.req.raw.headers.get(CF_CONNECTING_IP)?.trim() ?? ''
     const ts = Date.now()
 
-    // Persist BEFORE scoring: the aggregates/verdict must reflect this check-in
-    // (PLAN-001 acceptance ordering). No-op under the empty fallback.
+    // Persist BEFORE scoring: the aggregates/verdict must reflect this check-in.
+    // No-op under the empty fallback.
     await store.record({
       accountId: req.accountId,
       visitorId: req.identify.visitorId,
@@ -83,9 +83,9 @@ export function createApp(deps: Deps): Hono {
 }
 
 /**
- * Reconcile the store's nested {@link AggregateResult} (CHECKIN-002) to the
- * engine's flat {@link Aggregates} (CHECKIN-003). The top-level keys already
- * match PLAN-001; this picks the single window/metric each threshold is defined
+ * Reconcile the store's nested {@link AggregateResult} to the engine's flat
+ * {@link Aggregates}. The top-level keys already match the aggregate names; this
+ * picks the single window/metric each threshold is defined
  * against: fan-out on the 24h window, IP sharing on the 1h window, the churn
  * `rate` and timing `regularity` scalars. `account_device_count` and
  * `batch_clustering` are not thresholded by `assess()` today but are carried so

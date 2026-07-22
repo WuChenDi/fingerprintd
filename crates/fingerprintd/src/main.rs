@@ -28,7 +28,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState::from_config(&config);
 
-    // Compliance retention (finding M6): when a window is configured, sweep the
+    // Compliance retention: when a window is configured, sweep the
     // fingerprint library on a timer so records age out even without identify
     // traffic. Disabled (default) leaves behaviour unchanged.
     if state.retention_ms > 0 {
@@ -45,7 +45,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Spawn the background compliance retention sweep (finding M6).
+/// Spawn the background compliance retention sweep.
 ///
 /// Every `retention_secs` (clamped to `[1s, 1h]` so a long window still reclaims
 /// promptly and a short one never busy-loops), purge records older than the

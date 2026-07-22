@@ -26,7 +26,7 @@ path = "src/lib.rs"
 [dependencies]
 fp-core = { path = "../fp-core" }
 # `time` (additive over the workspace features) powers the retention sweep's
-# `tokio::time::interval` (finding M6); the rest come from the workspace dep.
+# `tokio::time::interval`; the rest come from the workspace dep.
 tokio = { workspace = true, features = ["time"] }
 axum  = { workspace = true }
 serde = { workspace = true }

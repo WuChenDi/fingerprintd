@@ -1,5 +1,5 @@
 /**
- * WASM ↔ server PARITY (TC5 acceptance).
+ * WASM ↔ server PARITY.
  *
  * Instantiates the vendored `fp-wasm` module headlessly (reading the `.wasm`
  * bytes and letting the wasm-bindgen glue instantiate them — `--target web`

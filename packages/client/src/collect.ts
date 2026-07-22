@@ -1,6 +1,6 @@
 /**
  * Collection contract. A `Collector` turns a challenge into the client-observed
- * evidence the server will judge. TC2/TC3/TC5 plug concrete collectors in here
+ * evidence the server will judge. Concrete collectors plug in here
  * (canvas/audio/webgl, stable components, nonce-probe computation); this module
  * ships only the interface plus a trivial stub.
  *
@@ -20,11 +20,11 @@ import type { ChallengeResponse } from './types'
 export interface Collected {
   /** Raw stable components (no nonce mixed in) — the server's matching input. */
   stable_components: Record<string, unknown>
-  /** Optional nonce-probe response `hex(HMAC-SHA256(key, nonce))` (T8), computed
+  /** Optional nonce-probe response `hex(HMAC-SHA256(key, nonce))`, computed
    *  when the challenge advertises `collect.challenge.verify` and the client
    *  holds the probe key. */
   probe?: string
-  /** Optional client timestamp in Unix milliseconds (T9). Stamped at collection
+  /** Optional client timestamp in Unix milliseconds. Stamped at collection
    *  and echoed on `/identify`; the server checks it only when its timestamp
    *  window is enforced. */
   ts?: number
@@ -37,7 +37,7 @@ export type Collector = (challenge: ChallengeResponse) => Promise<Collected>
 /**
  * Trivial placeholder collector. Emits only the echoed challenge targets as a
  * marker so the flow is exercisable end-to-end in tests; it gathers NO real
- * fingerprint. Replace with a real collector (TC2/TC3/TC5) before production.
+ * fingerprint. Replace with a real collector before production.
  */
 export const stubCollector: Collector = (challenge) =>
   Promise.resolve({

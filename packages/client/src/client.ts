@@ -20,7 +20,7 @@ export interface ClientOptions {
   fetch?: FetchLike
 }
 
-/** The parsed `/identify` body plus the response-signature headers (T9), if the
+/** The parsed `/identify` body plus the response-signature headers, if the
  *  server signed the response. Both headers are absent when signing is off. */
 export interface IdentifyResult {
   /** The parsed success body. */

@@ -3,11 +3,11 @@
  *
  * Mirrors `apps/edge/src/index.ts`: per isolate it builds the host state
  * ({@link Deps}) once and hands each request to the Hono app in `app.ts`. The
- * storage layer (CHECKIN-002) adds two bindings — the `DB` D1 event log and the
+ * storage layer adds two bindings — the `DB` D1 event log and the
  * `VELOCITY` Durable Object for hot velocity counters — plus a `scheduled`
  * retention purge. Both bindings are optional: unbound (a bare `wrangler dev` or
  * a Node unit test) the Worker still serves, exactly like the edge Worker. The
- * rule engine (CHECKIN-003) and `/assess` (CHECKIN-004) wire the store into
+ * rule engine and `/assess` wire the store into
  * {@link Deps} and the app; this task only exports the DO and runs the cron.
  */
 
@@ -38,7 +38,7 @@ let app: ReturnType<typeof createApp> | undefined
 /** Build (once per isolate) the host state from the environment. The D1-backed
  *  store when the `DB` binding is present, else the empty fallback (all-zero
  *  aggregates), so `/checkin/assess` runs unbound. Threshold profiles use the
- *  CHECKIN-003 defaults. */
+ *  defaults. */
 function buildDeps(env: Env): Deps {
   if (deps) return deps
   deps = {

@@ -12,21 +12,21 @@
  */
 
 /** Cloudflare Worker environment bindings: string-typed config vars plus the
- *  PCF4 state bindings. All optional so the router stays unit-testable with
+ *  state bindings. All optional so the router stays unit-testable with
  *  injected stubs and the Worker degrades to in-isolate state when unbound. */
 export interface Env {
-  /** Nonce Durable Object namespace (PCF4). Unbound ⇒ the in-isolate stub. */
+  /** Nonce Durable Object namespace. Unbound ⇒ the in-isolate stub. */
   NONCE?: DurableObjectNamespace
-  /** D1 fingerprint database (PCF4). Unbound ⇒ the empty candidate stub. */
+  /** D1 fingerprint database. Unbound ⇒ the empty candidate stub. */
   DB?: D1Database
   /** Seeds the deterministic salt + MinHash family so blocking keys are stable
    *  across isolates (Worker Secret). Falls back to a dev-only placeholder. */
   FP_SALT_SECRET?: string
-  /** Pre-shared nonce-probe key (T8, Worker Secret). Empty/unset ⇒ probe OFF. */
+  /** Pre-shared nonce-probe key (Worker Secret). Empty/unset ⇒ probe OFF. */
   FP_PROBE_KEY?: string
-  /** Response-signing key (T9, Worker Secret). Empty/unset ⇒ signing OFF. */
+  /** Response-signing key (Worker Secret). Empty/unset ⇒ signing OFF. */
   FP_SIGNING_KEY?: string
-  /** `"1"`/`"true"` enables the request timestamp window (T9). Default OFF. */
+  /** `"1"`/`"true"` enables the request timestamp window. Default OFF. */
   FP_ENFORCE_TS_WINDOW?: string
   /** Allowed clock skew in seconds when the timestamp window is on. Default 30. */
   FP_TS_SKEW_SECS?: string
@@ -34,11 +34,11 @@ export interface Env {
   FP_NONCE_TTL_SECS?: string
   /** `"1"`/`"true"` trusts edge-injected passive-signal headers. Default OFF. */
   FP_TRUST_EDGE_HEADERS?: string
-  /** Admin key gating `DELETE /visitor/{id}` GDPR erasure (M6, Worker Secret).
+  /** Admin key gating `DELETE /visitor/{id}` GDPR erasure (Worker Secret).
    *  Empty/unset ⇒ the erasure endpoint is DISABLED (returns 404, fail-closed). */
   FP_ADMIN_KEY?: string
   /** D1 retention window in seconds: templates whose `last_seen` is older than
-   *  this are purged by the scheduled cron (M6). `0`/unset ⇒ retention disabled. */
+   *  this are purged by the scheduled cron. `0`/unset ⇒ retention disabled. */
   FP_RETENTION_SECS?: string
   /** Comma-separated allowed CORS origins for the browser playground, e.g.
    *  `https://fingerprintd.pages.dev`. `*` allows any origin.

@@ -1,15 +1,15 @@
 /**
- * The D1-backed check-in event store (CHECKIN-002): the relationship-graph
- * state the rule engine (CHECKIN-003) and the `/assess` endpoint (CHECKIN-004)
- * consume. Mirrors `apps/edge/src/fingerprint-store-d1.ts` — a stateless
- * Drizzle wrapper over the `DB` binding — but instead of recall/drift it appends
- * check-in events and derives PLAN-001's windowed farming aggregates from them.
+ * The D1-backed check-in event store: the relationship-graph state the rule
+ * engine and the `/assess` endpoint consume. Mirrors
+ * `apps/edge/src/fingerprint-store-d1.ts` — a stateless Drizzle wrapper over the
+ * `DB` binding — but instead of recall/drift it appends check-in events and
+ * derives the windowed farming aggregates from them.
  *
  * One table (`src/db/schema.ts`): `checkin_events(account_id, visitor_id, ip,
  * ts)`. Every aggregate is a `COUNT(DISTINCT ...)` (or a small last-N scan)
  * bounded by a `ts >= now - window` range served by one of the composite
- * indexes. Pure aggregate query logic only — NO risk scoring lives here (that is
- * CHECKIN-003); this layer answers "how many distinct X in window W", nothing more.
+ * indexes. Pure aggregate query logic only — NO risk scoring lives here; this
+ * layer answers "how many distinct X in window W", nothing more.
  */
 
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
@@ -25,13 +25,13 @@ const MINUTE_MS = 60 * 1000
 
 /**
  * How many of an account's most-recent events feed `account_new_device_rate`
- * (PLAN-001's "last N"). Bounds the scan to a small tail so a long-lived account
+ * ("last N"). Bounds the scan to a small tail so a long-lived account
  * is judged on recent churn, not lifetime history.
  */
 export const NEW_DEVICE_SAMPLE = 20
 /**
  * How many of an account's most-recent timestamps feed
- * `checkin_interval_regularity` (PLAN-001's "last K"). Needs at least 2 to form
+ * `checkin_interval_regularity` ("last K"). Needs at least 2 to form
  * one interval; more sharpens the regularity estimate.
  */
 export const INTERVAL_SAMPLE = 10
@@ -49,10 +49,10 @@ export interface CheckinEvent {
 }
 
 /**
- * The PLAN-001 aggregate bundle returned by {@link D1CheckinStore.getAggregates}.
- * Top-level keys match PLAN-001's aggregate names EXACTLY so this is structurally
- * compatible with the canonical `Aggregates` type CHECKIN-003 defines in parallel
- * (`src/risk-config.ts`); CHECKIN-004 reconciles the two. Every value is a plain
+ * The aggregate bundle returned by {@link D1CheckinStore.getAggregates}.
+ * Top-level keys match the aggregate names EXACTLY so this is structurally
+ * compatible with the canonical `Aggregates` type defined in parallel
+ * (`src/risk-config.ts`); the endpoint reconciles the two. Every value is a plain
  * count / ratio — no thresholds or scores are applied here.
  */
 export interface AggregateResult {
@@ -122,7 +122,7 @@ export class D1CheckinStore {
   }
 
   /**
-   * Compute every PLAN-001 aggregate for the `(accountId, visitorId, ip)` triple
+   * Compute every aggregate for the `(accountId, visitorId, ip)` triple
    * as of `now` (Unix ms). Independent queries are issued concurrently — D1
    * serves each from a composite index — and folded into one {@link AggregateResult}.
    */

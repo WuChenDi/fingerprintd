@@ -12,8 +12,8 @@ use figment::{
 };
 use serde::{Deserialize, Serialize};
 
-/// A secret key loaded from configuration (the nonce-probe HMAC key T8, the
-/// GDPR-erasure admin credential M6).
+/// A secret key loaded from configuration (the nonce-probe HMAC key, the
+/// GDPR-erasure admin credential).
 ///
 /// Wraps the raw key so it is never accidentally logged: its [`fmt::Debug`] is
 /// redacted, so `Debug`-printing the containing [`Config`] does not leak it. It
@@ -71,7 +71,7 @@ pub struct Config {
     /// browser-looking JA4 to forge consistency. Overridable via
     /// `FINGERPRINTD_TRUST_EDGE_HEADERS`.
     pub trust_edge_headers: bool,
-    /// Optional pre-shared HMAC key for nonce-probe verification (T8, architecture §4.1
+    /// Optional pre-shared HMAC key for nonce-probe verification (architecture §4.1
     /// pt 3). When set (and non-empty), `GET /challenge` advertises the probe
     /// transform and `POST /identify` requires a correct `probe` field, rejecting
     /// a missing or forged one with `401`. Left unset by default: the probe is
@@ -80,7 +80,7 @@ pub struct Config {
     /// legitimate traffic. Overridable via `FINGERPRINTD_PROBE_KEY`.
     #[serde(default)]
     pub probe_key: Option<SecretKey>,
-    /// Optional pre-shared HMAC key for signing `/identify` responses (T9, architecture
+    /// Optional pre-shared HMAC key for signing `/identify` responses (architecture
     /// §4.1). When set (and non-empty), each success carries `x-fp-timestamp`
     /// and `x-fp-signature` headers so a consumer can detect a tampered or forged
     /// response (`crate::signing`). Left unset by default (fail-open on an absent
@@ -88,7 +88,7 @@ pub struct Config {
     /// unaffected. Overridable via `FINGERPRINTD_RESPONSE_SIGNING_KEY`.
     #[serde(default)]
     pub response_signing_key: Option<SecretKey>,
-    /// Whether to enforce the request timestamp window on `/identify` (T9, architecture
+    /// Whether to enforce the request timestamp window on `/identify` (architecture
     /// §4.1). When `true`, a request whose `ts` (Unix milliseconds) is absent or
     /// more than `ts_skew_secs` from server time is rejected with `401`, bounding
     /// how long a captured payload stays replayable on top of the one-time nonce.
@@ -96,17 +96,17 @@ pub struct Config {
     /// unaffected. Overridable via `FINGERPRINTD_ENFORCE_TS_WINDOW`.
     pub enforce_ts_window: bool,
     /// Allowed clock skew, in seconds, for the request timestamp window when
-    /// `enforce_ts_window` is on (T9). A request is accepted iff its `ts` is
+    /// `enforce_ts_window` is on. A request is accepted iff its `ts` is
     /// within `±ts_skew_secs` of server time. Overridable via
     /// `FINGERPRINTD_TS_SKEW_SECS`.
     pub ts_skew_secs: u64,
-    /// Cap on distinct visitors kept in the in-memory fingerprint library
-    /// (finding H2). Once exceeded, the oldest-seen visitor is evicted (and
+    /// Cap on distinct visitors kept in the in-memory fingerprint library.
+    /// Once exceeded, the oldest-seen visitor is evicted (and
     /// counted). Fail-safe generous default so a small workload is unaffected;
     /// bounds unbounded growth. Overridable via `FINGERPRINTD_FUZZY_MAX_RECORDS`.
     pub fuzzy_max_records: usize,
     /// Time-to-live, in seconds, for an in-memory record: an entry not seen
-    /// within this window is evicted on the next observe (finding H2). `0`
+    /// within this window is evicted on the next observe. `0`
     /// disables TTL eviction (the default). Overridable via
     /// `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`.
     pub fuzzy_record_ttl_secs: u64,
@@ -114,13 +114,13 @@ pub struct Config {
     /// this size drops (and counts) further insertions. Overridable via
     /// `FINGERPRINTD_FUZZY_MAX_BLOCK`.
     pub fuzzy_max_block: usize,
-    /// Cap on distinct tracked frequency values for `u_i` estimation (finding
-    /// H2). A new value beyond the cap is dropped (already-tracked values keep
+    /// Cap on distinct tracked frequency values for `u_i` estimation.
+    /// A new value beyond the cap is dropped (already-tracked values keep
     /// counting). Fail-safe generous default. Overridable via
     /// `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES`.
     pub fuzzy_max_frequency_values: usize,
     /// Optional pre-shared admin credential gating the GDPR erasure endpoint
-    /// `DELETE /visitor/{id}` (finding M6, architecture §7 RTBF). When set (and non-empty),
+    /// `DELETE /visitor/{id}` (architecture §7 RTBF). When set (and non-empty),
     /// the endpoint accepts an `Authorization: Bearer <admin_key>` request and
     /// erases the visitor. Left unset by default and **fail-closed**: with no key
     /// the endpoint is disabled entirely (`404`), and a configured key rejects a
@@ -130,7 +130,7 @@ pub struct Config {
     pub admin_key: Option<SecretKey>,
     /// Compliance retention window, in seconds: the maximum age (by `last_seen`) a
     /// visitor record is retained before a proactive background sweep purges it
-    /// (finding M6, architecture §7). `0` disables the sweep (the default), leaving
+    /// (architecture §7). `0` disables the sweep (the default), leaving
     /// behaviour unchanged. Distinct from and additive to the lazy
     /// `fuzzy_record_ttl_secs` eviction: this runs on a timer even without
     /// identify traffic. Overridable via `FINGERPRINTD_RETENTION_SECS`.

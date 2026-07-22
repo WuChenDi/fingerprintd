@@ -1,6 +1,6 @@
 /**
- * Rule-engine configuration for the check-in risk layer (PLAN-001 §Decision
- * logic). Weights and thresholds are data, not code: {@link assess} reads them
+ * Rule-engine configuration for the check-in risk layer. Weights and thresholds
+ * are data, not code: {@link assess} reads them
  * from a {@link ThresholdProfile} selected by `action`, so tuning never touches
  * the scoring path. Defaults live in {@link defaultProfiles}.
  */
@@ -9,10 +9,9 @@ import type { AssessRequest } from './types'
 
 /**
  * Aggregate signals the rule engine consumes — the account/device/IP/time
- * relationship state fingerprintd deliberately does not own (PLAN-001
- * §Aggregates). Field names match the plan's aggregate keys exactly so the
- * storage layer's (CHECKIN-002) query output can be passed straight in via
- * structural typing.
+ * relationship state fingerprintd deliberately does not own. Field names match
+ * the plan's aggregate keys exactly so the storage layer's query output can be
+ * passed straight in via structural typing.
  */
 export interface Aggregates {
   /** Distinct accounts seen on this device (visitorId → distinct accountId). */
@@ -60,9 +59,8 @@ export interface ThresholdProfile {
 }
 
 /**
- * Default `daily_checkin` profile — the weights and thresholds documented in
- * PLAN-001 §Decision logic. Conservative `deny` band; prefer `challenge` on
- * shared-egress false positives (PLAN-001 §Risks).
+ * Default `daily_checkin` profile — the weights and thresholds. Conservative
+ * `deny` band; prefer `challenge` on shared-egress false positives.
  */
 export const defaultProfiles: Record<
   AssessRequest['action'],

@@ -7,7 +7,7 @@
  * initializes the WASM runtime once, builds the configured engine and the host
  * state, and hands each request to the Hono app in `app.ts`.
  *
- * State (PCF4): when the `NONCE` Durable Object and `DB` D1 bindings are present
+ * State: when the `NONCE` Durable Object and `DB` D1 bindings are present
  * the Worker uses the durable nonce store and the D1 fingerprint index; unbound
  * (e.g. a bare `wrangler dev` without state, or a Node unit test) it falls back
  * to the in-isolate stubs, so the app runs either way. The nonce Durable Object
@@ -64,7 +64,7 @@ export default {
   },
 
   /**
-   * D1 retention purge (M6), driven by the `wrangler.jsonc` cron trigger. When
+   * D1 retention purge, driven by the `wrangler.jsonc` cron trigger. When
    * `FP_RETENTION_SECS` is set (>0) and D1 is bound, delete every template last
    * seen beyond the window plus its blocking-index rows; disabled (0) ⇒ no-op.
    * The purge query lives on {@link D1FingerprintStore.purgeOlderThan} so it is

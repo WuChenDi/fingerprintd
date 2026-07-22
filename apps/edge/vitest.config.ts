@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config'
 // workspace file (`vitest.workspace.ts`) in favour of `test.projects`:
 //   - vitest.node.config.ts    — Node: the state-free router contract over the
 //                                vendored WASM bytes (no Workers runtime).
-//   - vitest.workers.config.ts — workerd/miniflare: the PCF4 state layer (nonce
+//   - vitest.workers.config.ts — workerd/miniflare: the state layer (nonce
 //                                Durable Object, D1 recall/persist) against the
 //                                real runtime with live bindings.
 export default defineConfig({

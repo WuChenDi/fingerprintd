@@ -1,5 +1,5 @@
 /**
- * Hot atomic velocity counters as a Durable Object (CHECKIN-002).
+ * Hot atomic velocity counters as a Durable Object.
  *
  * The windowed fan-out aggregates (`device_account_fanout`, `ip_account_count`)
  * are load-bearing but expensive: computing them from D1 means a `COUNT(DISTINCT)`

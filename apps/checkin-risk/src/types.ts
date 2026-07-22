@@ -5,8 +5,8 @@
  * fingerprintd identify contract (`apps/edge/src/types.ts`), kept byte-compatible
  * so the caller can pass a verdict obtained from either the Axum server or the
  * edge Worker straight through. {@link AssessRequest} / {@link AssessResponse}
- * are the new check-in surface (PLAN-001); the rule engine (CHECKIN-003) and the
- * endpoint (CHECKIN-004) fill these in.
+ * are the new check-in surface; the rule engine and the
+ * endpoint fill these in.
  */
 
 /** Passive network-signal risk summary (fingerprintd identify contract). */
@@ -41,7 +41,7 @@ export interface IdentifyResponse {
 }
 
 /**
- * `POST /assess` request body (PLAN-001).
+ * `POST /assess` request body.
  *
  * `accountId` is the core new dimension: the business identity the caller wants
  * scored for check-in farming. `identify` is the fingerprintd verdict the caller
@@ -65,7 +65,7 @@ export interface AssessReason {
   detail: string
 }
 
-/** `POST /assess` success body (PLAN-001). */
+/** `POST /assess` success body. */
 export interface AssessResponse {
   /** Gate action the caller should take. */
   decision: 'allow' | 'challenge' | 'deny'
