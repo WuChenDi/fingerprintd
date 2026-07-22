@@ -20,6 +20,12 @@ Primary docs:
   `fp-core` compiled to WASM). A client works against either unchanged.
 - A browser SDK (`@cdlab/fingerprintd-client`) wraps FingerprintJS/BotD, computes
   the nonce freshness probe in WASM, and submits — it never derives an id.
+- A browser playground (`apps/web`) drives the full flow and visualizes what the
+  client sends vs. what the server judges.
+- A downstream risk layer (`apps/checkin-risk`) consumes `/identify` output plus its
+  own account/device/IP/time aggregation to score check-in anti-farming — the
+  reference example of turning fingerprintd signals into an allow/challenge/deny
+  decision without modifying the core.
 
 ## The flow
 
