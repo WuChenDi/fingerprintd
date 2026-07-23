@@ -18,6 +18,9 @@ export const zh: Record<string, string> = {
   'Signing key (optional)': '签名密钥（可选）',
   'UTF-8 signing key to verify the response signature':
     '用于校验响应签名的 UTF-8 密钥',
+  'Account ID': '账户 ID',
+  'Business account to score for check-in farming after identify succeeds.':
+    'identify 成功后，用于评估签到刷量风险的业务账户。',
   'Run flow': '运行流程',
   'Running…': '运行中…',
   Reset: '重置',
@@ -62,6 +65,23 @@ export const zh: Record<string, string> = {
   'Timestamp (ts)': '时间戳 (ts)',
   'client clock at collection': '采集时的客户端时钟',
   'not sent': '未发送',
+
+  // Check-in risk
+  'Check-in risk': '签到风险',
+  'Anti-farming decision for this account on daily_checkin.':
+    '该账户在 daily_checkin 上的反刷量判定。',
+  'Assessing check-in risk…': '正在评估签到风险…',
+  'Check-in assessment unavailable': '签到评估不可用',
+  Verdict: '判定',
+  Risk: '风险',
+  Reasons: '原因',
+  'No reasons.': '无原因。',
+  allow: '放行',
+  challenge: '验证',
+  deny: '拒绝',
+  human: '真人',
+  suspicious: '可疑',
+  farming: '刷量',
 
   // Signature
   'Response signature': '响应签名',
