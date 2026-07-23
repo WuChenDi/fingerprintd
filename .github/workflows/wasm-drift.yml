@@ -33,7 +33,14 @@ name: WASM drift
 on:
   push:
     branches: [main]
+    paths: &wasm-drift-paths
+      - "crates/**"
+      - "apps/edge/**"
+      - "packages/client/**"
+      - "bun.lock"
+      - ".github/workflows/wasm-drift.yml"
   pull_request:
+    paths: *wasm-drift-paths
 
 jobs:
   wasm-drift:
