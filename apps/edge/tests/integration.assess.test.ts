@@ -11,18 +11,46 @@
  * the real config rather than a copy of it.
  */
 
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
+import type { CheckinStore } from '../src/checkin-state'
+import { zeroAggregateResult } from '../src/checkin-state'
 import type { AggregateResult } from '../src/checkin-store-d1'
+import { resolveConfig } from '../src/config'
+import { EdgeEngine, initEngineRuntime } from '../src/engine'
 import type { ReasonCode, ThresholdProfile } from '../src/risk-config'
 import { defaultProfiles } from '../src/risk-config'
-import type { CheckinStore } from '../src/state'
-import { zeroAggregateResult } from '../src/state'
+import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
 import type {
   AssessRequest,
   AssessResponse,
   IdentifyResponse,
 } from '../src/types'
+
+// The assess path lives in the merged edge app, so a test builds the FULL edge
+// `Deps` with an injected check-in store. The WASM engine loads once from the
+// vendored bytes (the assess route never touches it, but `Deps` requires it).
+beforeAll(() => {
+  const wasmPath = fileURLToPath(
+    new URL('../wasm/fp_wasm_bg.wasm', import.meta.url).href,
+  )
+  initEngineRuntime(readFileSync(wasmPath))
+})
+
+/** Build the full edge deps with an injected check-in store. */
+function makeDeps(checkin: CheckinStore): Deps {
+  const config = resolveConfig({})
+  return {
+    engine: new EdgeEngine(config),
+    nonces: new InMemoryNonceStore(config.nonceTtlSecs),
+    candidates: new EmptyCandidateSource(),
+    config,
+    checkin,
+  }
+}
 
 /** The committed profile the endpoint scores `daily_checkin` against. */
 const cfg: ThresholdProfile = defaultProfiles.daily_checkin
@@ -85,8 +113,8 @@ async function assess(
   agg: AggregateResult,
   body: AssessRequest,
 ): Promise<AssessResponse> {
-  const app = createApp({ store: storeReturning(agg) })
-  const res = await app.request('https://checkin.test/checkin/assess', {
+  const app = createApp(makeDeps(storeReturning(agg)))
+  const res = await app.request('https://edge.test/checkin/assess', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

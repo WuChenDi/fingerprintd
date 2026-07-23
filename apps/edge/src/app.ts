@@ -21,11 +21,17 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import * as z from 'zod'
+import type { CheckinStore } from './checkin-state'
+import type { AggregateResult } from './checkin-store-d1'
 import type { EdgeConfig } from './config'
 import type { EdgeEngine } from './engine'
+import type { Aggregates } from './risk-config'
+import { defaultProfiles } from './risk-config'
+import { assess } from './risk-engine'
 import { SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER } from './signature'
 import type { CandidateSource, NonceStore } from './state'
 import type {
+  AssessRequest,
   ChallengeResponse,
   IdentifyResponse,
   PassiveVerdict,
@@ -38,6 +44,7 @@ export interface Deps {
   nonces: NonceStore
   candidates: CandidateSource
   config: EdgeConfig
+  checkin: CheckinStore
 }
 
 /** Stable probe identifiers advertised in `GET /challenge` (matches the server). */
@@ -74,6 +81,29 @@ const identifySchema = z
     stable_components: z.record(z.string(), z.unknown()),
     probe: z.string().optional(),
     ts: z.number().optional(),
+  })
+  .strict()
+
+/**
+ * `POST /checkin/assess` request body. `.strict()` at the top level REJECTS any
+ * unknown key — a body carrying edge-observed `ip`/`ts` is a `400`, since those
+ * are observed edge-side and never client-supplied. `identify` is `.loose()` so
+ * the full pass-through `IdentifyResponse` (confidence, decision, …) is accepted
+ * while only the load-bearing `visitorId` / `signals` are validated.
+ */
+const assessSchema = z
+  .object({
+    accountId: z.string().min(1),
+    action: z.literal('daily_checkin'),
+    identify: z
+      .object({
+        visitorId: z.string().min(1),
+        signals: z.object({
+          ua_tls_consistent: z.boolean(),
+          ip_risk: z.enum(['low', 'medium', 'high']),
+        }),
+      })
+      .loose(),
   })
   .strict()
 
@@ -178,6 +208,38 @@ export function createApp(deps: Deps): Hono {
     return signedJson(response, deps.config, deps.engine, now)
   })
 
+  // Check-in anti-farming decision layer: score a business `accountId` + the
+  // fingerprintd verdict into an allow/challenge/deny gate. Independent of
+  // `/identify` — the caller passes through an already-obtained identify body.
+  // `ip`/`ts` are observed edge-side (never from the body); the event is
+  // recorded BEFORE the aggregates are read so this check-in is reflected.
+  app.post('/checkin/assess', zValidator('json', assessSchema), async (c) => {
+    const req = c.req.valid('json')
+    const { accountId, identify } = req
+
+    const ip = c.req.raw.headers.get(CF_CONNECTING_IP)?.trim() ?? ''
+    const ts = Date.now()
+
+    await deps.checkin.record({
+      accountId,
+      visitorId: identify.visitorId,
+      ip,
+      ts,
+    })
+    const agg = await deps.checkin.getAggregates(
+      accountId,
+      identify.visitorId,
+      ip,
+      ts,
+    )
+    const result = assess(
+      req as unknown as AssessRequest,
+      toAggregates(agg),
+      defaultProfiles[req.action],
+    )
+    return c.json(result)
+  })
+
   // GDPR erasure: remove every trace of a visitor. Fail-closed and
   // admin-gated — never exposed without an explicit key, never leaks existence.
   //   - no admin key configured ⇒ endpoint DISABLED ⇒ 404 (as if unrouted).
@@ -271,6 +333,28 @@ function claimedUa(components: Record<string, unknown>): string | undefined {
 /** Clamp a fused confidence into `[0, 1]` (fuzzy-matching §6). */
 function clamp(value: number): number {
   return Math.min(1, Math.max(0, value))
+}
+
+/**
+ * Reconcile the check-in store's nested {@link AggregateResult} to the risk
+ * engine's flat {@link Aggregates}: the single window/metric each threshold is
+ * defined against (fan-out on 24h, IP sharing on 1h, the churn `rate` and timing
+ * `regularity` scalars). `account_device_count` and `batch_clustering` are not
+ * thresholded today but carried so the shape is complete (batch as the larger of
+ * the device/IP burst).
+ */
+function toAggregates(r: AggregateResult): Aggregates {
+  return {
+    device_account_fanout: r.device_account_fanout.h24,
+    account_device_count: r.account_device_count.d7,
+    account_new_device_rate: r.account_new_device_rate.rate,
+    ip_account_count: r.ip_account_count.h1,
+    checkin_interval_regularity: r.checkin_interval_regularity.regularity,
+    batch_clustering: Math.max(
+      r.batch_clustering.device,
+      r.batch_clustering.ip,
+    ),
+  }
 }
 
 /** A `200 application/json` response over a stable serialization. */

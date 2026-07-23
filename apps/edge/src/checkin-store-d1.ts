@@ -13,9 +13,9 @@
  */
 
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import type { Db } from './db/client'
-import { getDb } from './db/client'
-import { checkinEvents } from './db/schema'
+import type { Db } from './checkin-db/client'
+import { getDb } from './checkin-db/client'
+import { checkinEvents } from './checkin-db/schema'
 
 /** One hour / one day in milliseconds — the units the windows below are cut in. */
 const HOUR_MS = 60 * 60 * 1000

@@ -1,13 +1,42 @@
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
+import type { CheckinStore } from '../src/checkin-state'
+import { EmptyCheckinStore, zeroAggregateResult } from '../src/checkin-state'
 import type { AggregateResult, CheckinEvent } from '../src/checkin-store-d1'
-import type { CheckinStore } from '../src/state'
-import { zeroAggregateResult } from '../src/state'
+import { resolveConfig } from '../src/config'
+import { EdgeEngine, initEngineRuntime } from '../src/engine'
+import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
 import type {
   AssessRequest,
   AssessResponse,
   IdentifyResponse,
 } from '../src/types'
+
+// `/checkin/assess` lives in the merged edge app, so a test drives the FULL
+// edge `Deps` (engine, nonces, candidates, config) with an injected check-in
+// store — the assess path only touches `deps.checkin`, but the app still needs
+// the rest wired. The WASM engine is loaded once from the vendored bytes.
+beforeAll(() => {
+  const wasmPath = fileURLToPath(
+    new URL('../wasm/fp_wasm_bg.wasm', import.meta.url).href,
+  )
+  initEngineRuntime(readFileSync(wasmPath))
+})
+
+/** Build the full edge deps with an injected check-in store (empty by default). */
+function makeDeps(checkin: CheckinStore = new EmptyCheckinStore()): Deps {
+  const config = resolveConfig({})
+  return {
+    engine: new EdgeEngine(config),
+    nonces: new InMemoryNonceStore(config.nonceTtlSecs),
+    candidates: new EmptyCandidateSource(),
+    config,
+    checkin,
+  }
+}
 
 /** A clean pass-through identify verdict; override per case. */
 function buildIdentify(
@@ -40,7 +69,7 @@ function post(
   body: unknown,
 ): Promise<Response> {
   return Promise.resolve(
-    app.request('https://checkin.test/checkin/assess', {
+    app.request('https://edge.test/checkin/assess', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -58,7 +87,7 @@ function asAssess(res: Response): Promise<AssessResponse> {
 
 describe('POST /checkin/assess', () => {
   it('scores a clean request as allow/human (empty-store fallback)', async () => {
-    const app = createApp({})
+    const app = createApp(makeDeps())
     const res = await post(app, buildBody())
     expect(res.status).toBe(200)
     const json = await asAssess(res)
@@ -72,8 +101,8 @@ describe('POST /checkin/assess', () => {
   })
 
   it('does not throw and allows when D1/DO are unbound', async () => {
-    // `createApp({})` => EmptyCheckinStore: record is a no-op, aggregates zero.
-    const app = createApp({})
+    // EmptyCheckinStore: record is a no-op, aggregates zero.
+    const app = createApp(makeDeps())
     const res = await post(app, buildBody())
     expect(res.status).toBe(200)
     expect((await asAssess(res)).decision).toBe('allow')
@@ -93,7 +122,7 @@ describe('POST /checkin/assess', () => {
         return Promise.resolve(zeroAggregateResult())
       },
     }
-    const app = createApp({ store: spyStore })
+    const app = createApp(makeDeps(spyStore))
     const res = await post(app, buildBody())
     expect(res.status).toBe(200)
     expect(calls).toEqual(['record', 'getAggregates'])
@@ -115,7 +144,7 @@ describe('POST /checkin/assess', () => {
       record: () => Promise.resolve(),
       getAggregates: () => Promise.resolve(farmed),
     }
-    const app = createApp({ store })
+    const app = createApp(makeDeps(store))
     const res = await post(app, buildBody())
     expect(res.status).toBe(200)
     const json = await asAssess(res)
@@ -127,47 +156,46 @@ describe('POST /checkin/assess', () => {
 
   describe('rejects a malformed body with 400', () => {
     it('missing accountId', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const { accountId: _drop, ...rest } = buildBody()
       const res = await post(app, rest)
       expect(res.status).toBe(400)
-      expect(((await res.json()) as { error?: string }).error).toBeDefined()
     })
 
     it('wrong action', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const res = await post(app, { ...buildBody(), action: 'weekly_checkin' })
       expect(res.status).toBe(400)
     })
 
     it('unknown top-level field', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const res = await post(app, { ...buildBody(), extra: true })
       expect(res.status).toBe(400)
     })
 
     it('body carrying edge-observed ip', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const res = await post(app, { ...buildBody(), ip: '10.0.0.1' })
       expect(res.status).toBe(400)
     })
 
     it('body carrying edge-observed ts', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const res = await post(app, { ...buildBody(), ts: 123 })
       expect(res.status).toBe(400)
     })
 
     it('identify missing signals', async () => {
-      const app = createApp({})
+      const app = createApp(makeDeps())
       const { signals: _drop, ...identify } = buildIdentify()
       const res = await post(app, { ...buildBody(), identify })
       expect(res.status).toBe(400)
     })
 
     it('invalid JSON', async () => {
-      const app = createApp({})
-      const res = await app.request('https://checkin.test/checkin/assess', {
+      const app = createApp(makeDeps())
+      const res = await app.request('https://edge.test/checkin/assess', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{ not json',

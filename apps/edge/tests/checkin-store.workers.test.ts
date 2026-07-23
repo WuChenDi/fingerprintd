@@ -36,12 +36,14 @@ async function seed(
 
 // Isolated storage also resets per file, but this keeps each test order-independent.
 beforeEach(async () => {
-  await env.DB.batch([env.DB.prepare('DELETE FROM checkin_events')])
+  await env.CHECKIN_DB.batch([
+    env.CHECKIN_DB.prepare('DELETE FROM checkin_events'),
+  ])
 })
 
 describe('device_account_fanout (device farm)', () => {
   it('counts distinct accounts per device within 24h and 7d', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       // Device `farm` fans out across 3 accounts inside 24h...
       ev('a1', 'farm', 'ip1', NOW - 1 * HOUR),
@@ -63,7 +65,7 @@ describe('device_account_fanout (device farm)', () => {
 
 describe('account_device_count (account cultivation)', () => {
   it('counts distinct devices per account within 7d and 30d', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       ev('acct', 'd1', 'ip1', NOW - 1 * DAY),
       ev('acct', 'd2', 'ip1', NOW - 2 * DAY),
@@ -80,7 +82,7 @@ describe('account_device_count (account cultivation)', () => {
 
 describe('account_new_device_rate (fingerprint reset)', () => {
   it('is ~1 when every recent check-in is a fresh device', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     // 5 check-ins, all distinct devices ⇒ rate 1.
     await seed(store, [
       ev('reset', 'v1', 'ip1', NOW - 5 * HOUR),
@@ -96,7 +98,7 @@ describe('account_new_device_rate (fingerprint reset)', () => {
   })
 
   it('is low for a stable single-device account', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       ev('human', 'phone', 'ip1', NOW - 3 * DAY),
       ev('human', 'phone', 'ip1', NOW - 2 * DAY),
@@ -110,7 +112,7 @@ describe('account_new_device_rate (fingerprint reset)', () => {
   })
 
   it('samples only the most-recent N events', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     // Older events are all one shared device; the newest N are all distinct.
     const events: CheckinEvent[] = []
     for (let i = 0; i < 10; i++) {
@@ -132,7 +134,7 @@ describe('account_new_device_rate (fingerprint reset)', () => {
   })
 
   it('is 0 for an account with no events', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     const agg = await store.getAggregates('nobody', 'v0', 'ip0', NOW)
     expect(agg.account_new_device_rate).toEqual({ rate: 0, sampled: 0 })
   })
@@ -140,7 +142,7 @@ describe('account_new_device_rate (fingerprint reset)', () => {
 
 describe('ip_account_count (datacenter / proxy batch)', () => {
   it('counts distinct accounts per IP within 1h and 24h', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       ev('a1', 'v1', 'proxy', NOW - 10 * MINUTE),
       ev('a2', 'v2', 'proxy', NOW - 20 * MINUTE),
@@ -157,7 +159,7 @@ describe('ip_account_count (datacenter / proxy batch)', () => {
 
 describe('checkin_interval_regularity (scripted timing)', () => {
   it('approaches 1 for perfectly regular scripted check-ins', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     // Exactly one hour between every check-in ⇒ zero variance ⇒ regularity 1.
     const events: CheckinEvent[] = []
     for (let i = 0; i < INTERVAL_SAMPLE; i++) {
@@ -171,7 +173,7 @@ describe('checkin_interval_regularity (scripted timing)', () => {
   })
 
   it('is lower for irregular human timing', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     // Wildly uneven gaps ⇒ high coefficient of variation ⇒ regularity well below 1.
     await seed(store, [
       ev('human', 'phone', 'ip1', NOW),
@@ -191,7 +193,7 @@ describe('checkin_interval_regularity (scripted timing)', () => {
   })
 
   it('is 0 when there are fewer than two intervals', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       ev('acct', 'v1', 'ip1', NOW),
       ev('acct', 'v1', 'ip1', NOW - 1 * HOUR),
@@ -207,7 +209,7 @@ describe('checkin_interval_regularity (scripted timing)', () => {
 
 describe('batch_clustering (live minute burst)', () => {
   it('counts device and IP events within the current minute bucket', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     // Pin `now` to the middle of a minute so the whole bucket is in the past.
     const now = Math.floor(NOW / MINUTE) * MINUTE + 30 * 1000
     const bucketStart = Math.floor(now / MINUTE) * MINUTE
@@ -232,7 +234,7 @@ describe('batch_clustering (live minute burst)', () => {
 
 describe('purgeOlderThan (retention)', () => {
   it('deletes events before the cutoff and returns the count', async () => {
-    const store = new D1CheckinStore(env.DB)
+    const store = new D1CheckinStore(env.CHECKIN_DB)
     await seed(store, [
       ev('a1', 'v1', 'ip1', NOW - 40 * DAY), // stale
       ev('a2', 'v2', 'ip1', NOW - 35 * DAY), // stale
