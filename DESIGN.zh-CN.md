@@ -292,8 +292,9 @@ GDPR 被遗忘权(§7)。受 admin-key 门控(`admin_key`):未设置 ⇒ 该路�
 
 **下游消费者。** `visitorId` + `confidence` + `signals` 是给*风控引擎*的输入,本身不是
 终判 —— fingerprintd 刻意不持有账号状态与行为历史(非目标,§2)。需要 allow/challenge/deny
-决策的调用方在其之上叠加一层。[`apps/checkin-risk`](apps/checkin-risk/README.md) 是参考示例:
-它把 `/identify` 输出与账号/设备/IP/时序聚合结合,为每日签到反刷打分,而指纹核心保持不变。
+决策的调用方在其之上叠加一层。edge Worker 以一个 config 门控的 `POST /checkin/assess` 路由
+提供参考示例([`apps/edge`](apps/edge/README.md)):把 `/identify` 输出与账号/设备/IP/时序聚合
+结合,为每日签到反刷打分,而指纹核心保持不变。由 [playground](apps/web/README.md) 演示。
 
 ---
 

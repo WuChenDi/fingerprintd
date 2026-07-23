@@ -329,10 +329,11 @@ persisted deployment.
 **Downstream consumers.** `visitorId` + `confidence` + `signals` are inputs *for a
 risk engine*, not a verdict on their own — fingerprintd deliberately holds no
 account state and no behavioural history (Non-goal, §2). A caller that needs an
-allow/challenge/deny decision layers that on top. [`apps/checkin-risk`](apps/checkin-risk/README.md)
-is the reference example: it joins `/identify` output with account/device/IP/time
-aggregation to score daily check-in anti-farming, leaving the fingerprint core
-unchanged.
+allow/challenge/deny decision layers that on top. The edge Worker ships the
+reference example as a config-gated `POST /checkin/assess` route
+([`apps/edge`](apps/edge/README.md)): it joins `/identify` output with
+account/device/IP/time aggregation to score daily check-in anti-farming, leaving
+the fingerprint core unchanged. The [playground](apps/web/README.md) demos it.
 
 ---
 

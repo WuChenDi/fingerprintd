@@ -105,7 +105,7 @@ One compute core ([`crates/fp-core`](crates/fp-core), compiled to WASM via [`cra
 - **Native server** — [`crates/fingerprintd`](crates/fingerprintd), an Axum service with an in-memory store. Start here for self-hosting.
 - **Serverless edge** — [`apps/edge`](apps/edge/README.md), a Cloudflare Worker with a Durable Object nonce store and a D1 fingerprint library.
 - **Playground** — [`apps/web`](apps/web/README.md) drives the whole flow in a browser and visualizes what the client sends vs. what the server judges.
-- **Check-in risk layer** — [`apps/checkin-risk`](apps/checkin-risk/README.md) builds on `/identify`: it adds the account/device/IP/time aggregation fingerprintd deliberately doesn't hold, and turns a verdict into an allow / challenge / deny decision for daily check-in anti-farming.
+- **Check-in risk decision** — the edge Worker also serves `POST /checkin/assess`, a config-gated layer that adds the account/device/IP/time aggregation fingerprintd deliberately doesn't hold and turns a verdict into an allow / challenge / deny decision for daily check-in anti-farming; the [playground](apps/web/README.md) demos it.
 
 ## Configuration
 
@@ -139,9 +139,8 @@ crates/
 packages/
   client/           TypeScript browser SDK (FingerprintJS/BotD + collector)
 apps/
-  edge/             Cloudflare Worker (TS host + WASM engine + Durable Object/D1)
-  web/              React/Vite playground for the challenge/identify flow
-  checkin-risk/     check-in anti-farming decision layer over /identify
+  edge/             Cloudflare Worker: /identify + /checkin/assess (WASM engine + Durable Object/D1)
+  web/              React/Vite playground for the challenge / identify / check-in flow
 DESIGN.md           architecture + fuzzy-matching spec (bilingual)
 ```
 
@@ -159,13 +158,12 @@ cargo build --all-targets
 cargo deny check
 ```
 
-The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/ci.yml`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
+The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
 
 Per-component tooling:
 
 - **SDK** — `cd packages/client && bun run lint && bun run typecheck && bun run test`
-- **Edge Worker** — `cd apps/edge && bun run test` (router + state + parity in miniflare)
-- **Check-in risk** — `cd apps/checkin-risk && bun run test`
+- **Edge Worker** — `cd apps/edge && bun run test` (identify + check-in: router / state / parity / assess in miniflare)
 - **Playground** — `cd apps/web && bun run typecheck && bun run build`
 
 ## Design
