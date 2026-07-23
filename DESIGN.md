@@ -16,27 +16,32 @@ are stable anchors that source doc-comments cite as `architecture §N` /
 
 ## Contents
 
-**Architecture** — [1 Background](#1-background) ·
-[2 Goals and threat model](#2-goals-and-threat-model) ·
-[3 Success metrics](#3-success-metrics) ·
-[4 Challenge-response + server-side fusion](#4-architecture-challenge-response--server-side-fusion) ·
-[5 HTTP interface](#5-http-interface) · [6 Data model](#6-data-model) ·
-[7 Privacy and compliance](#7-privacy-and-compliance) ·
-[8 Deployment targets](#8-deployment-targets) ·
-[9 Defense-in-depth controls](#9-defense-in-depth-controls-config-gated-off-by-default)
+**Architecture**
 
-**Fuzzy matching** — [1 Problem statement](#1-problem-statement) ·
-[2 Component classification](#2-component-classification-the-modeling-premise) ·
-[3 Storage representation](#3-storage-representation) ·
-[4 Stage one: candidate generation](#4-stage-one-candidate-generation-blocking) ·
-[5 Stage two: probabilistic scoring](#5-stage-two-probabilistic-scoring-fellegisunter) ·
-[6 Confidence output](#6-confidence-output) ·
-[7 Drift and poisoning defense](#7-drift-template-adaptation-and-poisoning-defense) ·
-[8 Edge cases](#8-edge-cases) ·
-[9 Parameter estimation and cold start](#9-parameter-estimation-and-cold-start) ·
-[10 Offline evaluation](#10-offline-evaluation) ·
-[11 Data structures and performance](#11-data-structures-and-performance) ·
-[12 Open questions](#12-open-questions)
+1. [Background](#1-background)
+2. [Goals and threat model](#2-goals-and-threat-model)
+3. [Success metrics](#3-success-metrics)
+4. [Challenge-response + server-side fusion](#4-architecture-challenge-response--server-side-fusion)
+5. [HTTP interface](#5-http-interface)
+6. [Data model](#6-data-model)
+7. [Privacy and compliance](#7-privacy-and-compliance)
+8. [Deployment targets](#8-deployment-targets)
+9. [Defense-in-depth controls](#9-defense-in-depth-controls-config-gated-off-by-default)
+
+**Fuzzy matching**
+
+1. [Problem statement](#1-problem-statement)
+2. [Component classification](#2-component-classification-the-modeling-premise)
+3. [Storage representation](#3-storage-representation)
+4. [Stage one: candidate generation](#4-stage-one-candidate-generation-blocking)
+5. [Stage two: probabilistic scoring](#5-stage-two-probabilistic-scoring-fellegisunter)
+6. [Confidence output](#6-confidence-output)
+7. [Drift and poisoning defense](#7-drift-template-adaptation-and-poisoning-defense)
+8. [Edge cases](#8-edge-cases)
+9. [Parameter estimation and cold start](#9-parameter-estimation-and-cold-start)
+10. [Offline evaluation](#10-offline-evaluation)
+11. [Data structures and performance](#11-data-structures-and-performance)
+12. [Open questions](#12-open-questions)
 
 ---
 
