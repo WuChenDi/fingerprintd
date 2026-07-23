@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 #[cfg(feature = "rng")]
-use rand::{RngCore, rng};
+use rand::{Rng, rng};
 use sha2::{Digest, Sha256};
 
 use super::{blocking::BlockingKey, component::Hash32};

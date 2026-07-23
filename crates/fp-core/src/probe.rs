@@ -20,7 +20,7 @@
 
 use std::fmt;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 /// Advertised transform algorithm (challenge `verify.alg`).
