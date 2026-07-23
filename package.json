@@ -46,7 +46,7 @@
     "prepare": "bun run --filter=./packages/* build"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.2"
+    "@biomejs/biome": "^2.5.5"
   },
   "overrides": {
     "fast-uri": "3.1.4",
