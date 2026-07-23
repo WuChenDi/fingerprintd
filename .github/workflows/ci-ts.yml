@@ -1,64 +1,25 @@
-name: CI
+name: CI (ts)
 
+# Runs only when the TypeScript workspace (packages/apps) or its shared config
+# changes. The TS suites exercise the VENDORED wasm under `apps/*/wasm` and
+# `packages/client/wasm` (committed artifacts), so a Rust-source change does not
+# trigger this workflow — `wasm-drift.yml` is what guards source↔vendored
+# equivalence. The `push` and `pull_request` triggers share one path list via a
+# YAML anchor.
 on:
   push:
     branches: [main]
+    paths: &ts-paths
+      - "packages/**"
+      - "apps/**"
+      - "package.json"
+      - "bun.lock"
+      - "biome.json"
+      - ".github/workflows/ci-ts.yml"
   pull_request:
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+    paths: *ts-paths
 
 jobs:
-  rust:
-    name: rust (fmt + clippy + test + build + deny)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-nextest and cargo-deny
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest,cargo-deny
-
-      - name: Format check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Test (nextest)
-        run: cargo nextest run --all-features
-
-      - name: Build
-        run: cargo build --all-targets
-
-      - name: Supply-chain (cargo-deny)
-        run: cargo deny check
-
-  wasm:
-    name: wasm (fp-wasm)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Test (fp-wasm)
-        run: cargo test -p fp-wasm
-
   web:
     name: web (biome + typecheck + test + build)
     runs-on: ubuntu-latest
