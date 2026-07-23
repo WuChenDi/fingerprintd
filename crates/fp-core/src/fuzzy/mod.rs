@@ -19,6 +19,7 @@
 //! component observation into every index, and [`FuzzyStore::candidates`]
 //! performs stage-one recall.
 
+pub mod agreement;
 pub mod blocking;
 pub mod component;
 pub mod engine;
@@ -30,6 +31,7 @@ pub mod frequency;
 pub mod minhash;
 pub mod record;
 
+pub use agreement::AgreementStore;
 pub use blocking::CandidateSource;
 pub use engine::{Decision, MatchOutcome};
 pub use frequency::FrequencyStore;
@@ -44,6 +46,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use self::{
+    agreement::AgreementTable,
     blocking::{BlockingIndex, BlockingKey, DEFAULT_MAX_BLOCK},
     component::{Salt, Stability, Stored},
     frequency::FrequencyTable,
@@ -77,6 +80,10 @@ pub struct EvictionPolicy {
     /// unbounded. A new value beyond the cap is dropped (already-tracked values
     /// keep counting).
     pub max_frequency_values: Option<usize>,
+    /// Cap on the number of *distinct* tracked agreement components for `m_i`
+    /// estimation (fuzzy-matching §9); `None` is unbounded. A new component name
+    /// beyond the cap is dropped (already-tracked names keep counting).
+    pub max_agreement_components: Option<usize>,
     /// Per-block visitor cap for the blocking index (fuzzy-matching §4).
     pub max_block: usize,
 }
@@ -87,6 +94,7 @@ impl Default for EvictionPolicy {
             max_records: Some(1_000_000),
             record_ttl_ms: None,
             max_frequency_values: Some(1_000_000),
+            max_agreement_components: Some(1024),
             max_block: DEFAULT_MAX_BLOCK,
         }
     }
@@ -110,6 +118,9 @@ pub struct FuzzyStore {
     minhash: MinHashLsh,
     /// Per-value frequency material for `u_i` estimation (§9).
     frequency: Box<dyn FrequencyStore>,
+    /// Per-component agreement material for `m_i` estimation (§9): how often each
+    /// component's stored value agreed across confirmed same-device revisits.
+    agreement: Box<dyn AgreementStore>,
     /// Serializes the [`FuzzyStore::identify`] read-modify-write so its
     /// evaluate-then-observe critical section is atomic.
     ///
@@ -168,6 +179,9 @@ impl FuzzyStore {
             blocking: Box::new(BlockingIndex::with_max_block(policy.max_block)),
             minhash: MinHashLsh::new(),
             frequency: Box::new(FrequencyTable::with_capacity(policy.max_frequency_values)),
+            agreement: Box::new(AgreementTable::with_capacity(
+                policy.max_agreement_components,
+            )),
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -186,6 +200,7 @@ impl FuzzyStore {
             blocking: Box::new(BlockingIndex::new()),
             minhash: MinHashLsh::from_seed(secret),
             frequency: Box::new(FrequencyTable::new()),
+            agreement: Box::new(AgreementTable::new()),
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -193,18 +208,20 @@ impl FuzzyStore {
     /// Assemble a store from explicitly supplied backends — the injection seam.
     ///
     /// [`FuzzyStore::new`] and [`FuzzyStore::deterministic`] wire the in-memory
-    /// defaults ([`RecordStore`], [`BlockingIndex`], [`FrequencyTable`]), which
-    /// remain the only shipped backend. This constructor lets a caller swap any
-    /// of the three storage backends for an alternate implementation of
-    /// [`FingerprintStore`] / [`CandidateSource`] / [`FrequencyStore`] (an
-    /// externalized index, a test double) while keeping the same salt and
-    /// `MinHash` family so key derivation is unchanged.
+    /// defaults ([`RecordStore`], [`BlockingIndex`], [`FrequencyTable`],
+    /// [`AgreementTable`]), which remain the only shipped backend. This
+    /// constructor lets a caller swap any of the four storage backends for an
+    /// alternate implementation of [`FingerprintStore`] / [`CandidateSource`] /
+    /// [`FrequencyStore`] / [`AgreementStore`] (an externalized index, a test
+    /// double) while keeping the same salt and `MinHash` family so key derivation
+    /// is unchanged.
     pub fn from_backends(
         salt: Salt,
         minhash: MinHashLsh,
         records: Box<dyn FingerprintStore>,
         blocking: Box<dyn CandidateSource>,
         frequency: Box<dyn FrequencyStore>,
+        agreement: Box<dyn AgreementStore>,
     ) -> Self {
         Self {
             salt,
@@ -212,6 +229,7 @@ impl FuzzyStore {
             blocking,
             minhash,
             frequency,
+            agreement,
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -696,6 +714,7 @@ mod tests {
             }),
             Box::new(super::BlockingIndex::new()),
             Box::new(super::FrequencyTable::new()),
+            Box::new(super::AgreementTable::new()),
         );
 
         // A direct observation writes through the swapped backend...

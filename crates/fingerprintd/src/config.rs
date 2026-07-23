@@ -119,6 +119,11 @@ pub struct Config {
     /// counting). Fail-safe generous default. Overridable via
     /// `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES`.
     pub fuzzy_max_frequency_values: usize,
+    /// Cap on distinct tracked agreement components for `m_i` estimation.
+    /// A new component name beyond the cap is dropped (already-tracked names keep
+    /// counting). Fail-safe generous default. Overridable via
+    /// `FINGERPRINTD_FUZZY_MAX_AGREEMENT_COMPONENTS`.
+    pub fuzzy_max_agreement_components: usize,
     /// Optional pre-shared admin credential gating the GDPR erasure endpoint
     /// `DELETE /visitor/{id}` (architecture §7 RTBF). When set (and non-empty),
     /// the endpoint accepts an `Authorization: Bearer <admin_key>` request and
@@ -154,6 +159,7 @@ impl Default for Config {
             fuzzy_record_ttl_secs: 0,
             fuzzy_max_block: crate::fuzzy::blocking::DEFAULT_MAX_BLOCK,
             fuzzy_max_frequency_values: 1_000_000,
+            fuzzy_max_agreement_components: 1024,
             admin_key: None,
             retention_secs: 0,
         }
