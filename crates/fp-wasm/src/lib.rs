@@ -42,7 +42,7 @@ use fp_core::fuzzy::FuzzyStore;
 use fp_core::probe::ProbeVerifier;
 use fp_core::signals::{StaticIpIntel, compute};
 use fp_core::signing::ResponseSigner;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::Sha256;

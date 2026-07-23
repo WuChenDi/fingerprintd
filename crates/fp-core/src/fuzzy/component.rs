@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 #[cfg(feature = "rng")]
-use rand::{RngCore, rng};
+use rand::{Rng, rng};
 use sha2::{Digest, Sha256};
 
 /// A 256-bit salted digest — the on-store form of a scalar value or a set element.

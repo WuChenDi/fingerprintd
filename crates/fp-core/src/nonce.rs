@@ -12,7 +12,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use rand::{RngCore, rng};
+use rand::{Rng, rng};
 
 /// Result of attempting to consume a nonce.
 ///
