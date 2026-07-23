@@ -44,6 +44,16 @@ const SET_U: f64 = 0.05;
 /// Lower/upper clamps keeping `u_i` in `(0, 1)` so the log-ratios stay finite.
 const U_FLOOR: f64 = 1e-4;
 const U_CEIL: f64 = 0.9999;
+/// Pseudo-count weighting the `m_i` prior against the observed agreement rate
+/// (fuzzy-matching §9). A larger `α` holds the estimate near the prior until
+/// enough confirmed same-device revisits accumulate; `est → agree/total` only as
+/// `total` grows past it.
+const ALPHA: f64 = 20.0;
+/// Lower/upper clamps keeping the estimated `m_i` in `(0, 1)`. `M_CEIL < 1` keeps
+/// `(1 - m)` strictly positive so the disagreement log-ratio `log2((1-m)/(1-u))`
+/// stays finite; `M_FLOOR > 0` keeps the agreement log-ratio `log2(m/u)` finite.
+const M_FLOOR: f64 = 1e-4;
+const M_CEIL: f64 = 0.9999;
 /// Score scale (bits) over which confidence margins saturate (fuzzy-matching §6).
 const CONF_SCALE: f64 = 4.0;
 /// Component count of a full rich fingerprint. Confidence scales the number of
@@ -134,7 +144,14 @@ impl FuzzyStore {
         // under its freshly minted id; a review-band hit leaves the template
         // untouched (anti-poisoning).
         match outcome.decision {
-            Decision::Match | Decision::NewDevice => {
+            Decision::Match => {
+                // Learn `m_i` material from this confirmed same-device pair
+                // (fuzzy-matching §9) BEFORE `observe` drifts the template, so the
+                // probe is compared against the template as it stood at the match.
+                self.record_agreement(&outcome.visitor_id, components);
+                self.observe(&outcome.visitor_id, components, now_ms);
+            }
+            Decision::NewDevice => {
                 self.observe(&outcome.visitor_id, components, now_ms);
             }
             Decision::Review => {}
@@ -236,6 +253,37 @@ impl FuzzyStore {
         }
     }
 
+    /// Record per-component agreement of `components` against the matched
+    /// template's stored values, accumulating the material behind `m_i`
+    /// (fuzzy-matching §9).
+    ///
+    /// Called only from the `Decision::Match` arm of [`identify`], under its lock
+    /// and **before** [`observe`] drifts the template, so it compares the probe
+    /// against the template as it stood when the match was confirmed. Each
+    /// component present (and kind-compatible) on both sides contributes one
+    /// same-device observation: agreement iff its similarity clears `τ` — the
+    /// same threshold [`score_candidate`] uses. Names missing on either side, or
+    /// of mismatched kind (`compare` → `None`), are skipped.
+    ///
+    /// [`identify`]: FuzzyStore::identify
+    /// [`observe`]: FuzzyStore::observe
+    /// [`score_candidate`]: FuzzyStore::score_candidate
+    fn record_agreement(&self, visitor_id: &str, components: &Value) {
+        let Some(template) = self.record(visitor_id) else {
+            return;
+        };
+        let probe = self.stored_map(components);
+        for (name, probe_value) in &probe {
+            let Some(template_value) = template.components.get(name) else {
+                continue; // missing on the template side → not compared (§8)
+            };
+            let Some((sim, _u)) = self.compare(probe_value, template_value) else {
+                continue; // kind mismatch → not comparable
+            };
+            self.agreement.record(name, sim >= TAU);
+        }
+    }
+
     /// Fellegi–Sunter score of a candidate template against the probe (fuzzy-matching §5).
     ///
     /// Sums the per-component log-likelihood weight over components present on
@@ -251,7 +299,7 @@ impl FuzzyStore {
             let Some((sim, u)) = self.compare(probe_value, template_value) else {
                 continue; // kind mismatch → not comparable
             };
-            let m = classify(name).stability.m_prior();
+            let m = self.m_estimate(name, classify(name).stability.m_prior());
             score += agreement_weight(m, u, sim);
             compared += 1;
         }
@@ -291,6 +339,26 @@ impl FuzzyStore {
         let hits = self.frequency.count(value) as f64;
         let total = self.frequency.total() as f64;
         ((hits + 0.5) / (total + 1.0)).clamp(U_FLOOR, U_CEIL)
+    }
+
+    /// Estimate `m_i` for the component `name`: its observed same-device
+    /// agreement rate, shrunk toward the cold-start stability `prior` by an
+    /// `ALPHA`-weighted pseudo-count (fuzzy-matching §9).
+    ///
+    /// **Cold start is bit-identical:** with no recorded agreements
+    /// (`total == 0`) this returns the `prior` *exactly*, before any arithmetic,
+    /// so an empty store scores byte-for-byte as the fixed-prior path did. Once
+    /// confirmed same-device revisits accumulate, the estimate moves from the
+    /// prior toward the empirical rate; the clamp keeps it in `(0, 1)` so the
+    /// log-ratios stay finite.
+    #[allow(clippy::cast_precision_loss)] // agreement counts; precision loss immaterial
+    fn m_estimate(&self, name: &str, prior: f64) -> f64 {
+        let (agree, total) = self.agreement.stats(name);
+        if total == 0 {
+            return prior; // cold-start bit-identical
+        }
+        let est = (agree as f64 + ALPHA * prior) / (total as f64 + ALPHA);
+        est.clamp(M_FLOOR, M_CEIL)
     }
 }
 
@@ -650,5 +718,179 @@ mod tests {
             assert_eq!(out.decision, Decision::Match, "re-identify device {d}");
             assert!(seen.contains(&(d, out.visitor_id)));
         }
+    }
+
+    /// Cold start is prior-driven: on a fresh store the agreement table is empty
+    /// during the matching `evaluate`, so `m_estimate` returns the prior exactly
+    /// (bit-identity is proven cross-stack in MI-003). The first identify mints a
+    /// device; the second still Matches it, and only then does the Match-hook
+    /// populate the agreement material.
+    #[test]
+    fn cold_start_matches_on_priors_then_records_agreement() {
+        let store = FuzzyStore::new();
+        // Nothing learned yet: the estimate is the untouched prior.
+        assert_eq!(store.agreement.stats("webgl"), (0, 0));
+
+        let first = store.identify(&full_probe(), 1_000);
+        assert!(first.is_new_device); // NewDevice does not record agreement
+        assert_eq!(store.agreement.stats("webgl"), (0, 0));
+
+        let second = store.identify(&full_probe(), 2_000);
+        assert_eq!(second.decision, Decision::Match);
+        assert_eq!(second.visitor_id, first.visitor_id);
+        // The Match-hook fired: webgl agreed on this same-device revisit.
+        assert_eq!(store.agreement.stats("webgl"), (1, 1));
+    }
+
+    /// A high-stability component that agrees on every confirmed same-device
+    /// revisit accumulates agreement counts, and `m_estimate` moves from the cold
+    /// prior up toward `M_CEIL` as the empirical rate reinforces it (fuzzy-matching §9).
+    #[test]
+    fn repeated_same_device_matches_lift_m_estimate() {
+        use crate::fuzzy::classify;
+
+        let store = FuzzyStore::new();
+        let prior = classify("webgl").stability.m_prior();
+
+        // Seed the device, then revisit it repeatedly with the identical probe —
+        // every revisit is a Match that records webgl as agreeing.
+        store.identify(&full_probe(), 1_000);
+        for i in 0..10 {
+            let out = store.identify(&full_probe(), 2_000 + i);
+            assert_eq!(out.decision, Decision::Match);
+        }
+
+        // Ten confirmed same-device agreements accumulated.
+        assert_eq!(store.agreement.stats("webgl"), (10, 10));
+        // The estimate has climbed above the cold prior toward the ceiling.
+        let est = store.m_estimate("webgl", prior);
+        assert!(est > prior, "m_estimate {est} should exceed prior {prior}");
+        assert!(est < super::M_CEIL);
+        // An unlearned component still returns its untouched prior exactly.
+        assert!((store.m_estimate("plugins", 0.8) - 0.8).abs() < f64::EPSILON);
+    }
+
+    /// Learning is monotone: each confirmed same-device revisit of an
+    /// always-agreeing component moves its `m_estimate` strictly upward, starting
+    /// from the exact cold prior and rising toward — but never past — `M_CEIL`
+    /// (fuzzy-matching §9).
+    #[test]
+    fn m_estimate_climbs_monotonically_across_same_device_revisits() {
+        use crate::fuzzy::classify;
+
+        let store = FuzzyStore::new();
+        let prior = classify("webgl").stability.m_prior();
+
+        // Mint the device: NewDevice records no agreement, so the estimate is
+        // still the untouched cold prior, bit-for-bit.
+        store.identify(&full_probe(), 1_000);
+        let mut prev = store.m_estimate("webgl", prior);
+        assert!(
+            (prev - prior).abs() < f64::EPSILON,
+            "cold start returns the prior exactly"
+        );
+
+        // Every identical revisit is a Match that records webgl agreeing, lifting
+        // the estimate a little further each time.
+        for i in 0..12 {
+            let out = store.identify(&full_probe(), 2_000 + i);
+            assert_eq!(out.decision, Decision::Match);
+            let est = store.m_estimate("webgl", prior);
+            assert!(
+                est > prev,
+                "estimate must rise each revisit: {prev} -> {est}"
+            );
+            assert!(
+                est <= super::M_CEIL,
+                "estimate stays within the ceiling clamp"
+            );
+            assert!(est < 1.0);
+            prev = est;
+        }
+        assert!(
+            prev > prior,
+            "after revisits the estimate sits above the cold prior {prior}"
+        );
+    }
+
+    /// The `m_i` clamp keeps the log-ratio weights finite even at the limit
+    /// (`m → 1`): saturating a component's agreement pins `m_estimate` at `M_CEIL`
+    /// (never `1.0`), so the agree/disagree weights and the resulting identify
+    /// score stay finite — no `inf`/`NaN` leaks into scoring (fuzzy-matching §5/§9).
+    #[test]
+    fn score_stays_finite_when_m_is_driven_to_the_clamp() {
+        let store = FuzzyStore::new();
+        store.identify(&full_probe(), 1_000);
+
+        // Drive every component's agreement well past the point where the smoothed
+        // estimate would exceed the ceiling, so each `m_estimate` clamps at M_CEIL.
+        for name in [
+            "webgl",
+            "platform",
+            "timezone",
+            "audio",
+            "cpu_cores",
+            "device_memory",
+            "fonts",
+            "user_agent",
+        ] {
+            for _ in 0..20_000 {
+                store.agreement.record(name, true);
+            }
+            assert!(
+                (store.m_estimate(name, 0.95) - super::M_CEIL).abs() < 1e-9,
+                "{name} m_estimate should clamp to M_CEIL"
+            );
+        }
+
+        // The per-component weight is finite at the extreme for a full agreement
+        // (`log2(m/u)`) and a full disagreement (`log2((1-m)/(1-u))`) alike — the
+        // clamp keeps `m` off `0`/`1`, so neither log-ratio blows up.
+        assert!(super::agreement_weight(super::M_CEIL, super::U_FLOOR, 1.0).is_finite());
+        assert!(super::agreement_weight(super::M_CEIL, super::U_CEIL, 0.0).is_finite());
+
+        // A real identify with every `m` at the clamp still produces a finite score.
+        let out = store.identify(&full_probe(), 2_000);
+        assert_eq!(out.decision, Decision::Match);
+        let matched_score = out.score.expect("a matched candidate has a score");
+        assert!(matched_score.is_finite(), "score was {matched_score}");
+    }
+
+    /// A churning component that never agrees earns *less* trust than its cold
+    /// prior: the stable components carry each match, but the flaky `user_agent`
+    /// disagrees on every confirmed revisit, so its `m_estimate` is pulled below
+    /// the prior (fuzzy-matching §9).
+    #[test]
+    fn churning_component_m_estimate_falls_below_its_prior() {
+        use crate::fuzzy::classify;
+
+        let store = FuzzyStore::new();
+        let ua_prior = classify("user_agent").stability.m_prior();
+
+        // Seed the device, then revisit with the stable components unchanged (they
+        // carry the match) but a fresh user_agent each time, so it never agrees.
+        store.identify(&full_probe(), 1_000);
+        for i in 0..12 {
+            let mut probe = full_probe();
+            probe["user_agent"] = json!(format!("Chrome/{}", 200 + i));
+            let out = store.identify(&probe, 2_000 + i);
+            assert_eq!(
+                out.decision,
+                Decision::Match,
+                "stable components must carry the match while UA churns"
+            );
+        }
+
+        let (agree, total) = store.agreement.stats("user_agent");
+        assert_eq!(agree, 0, "user_agent never agreed");
+        assert!(
+            total >= 12,
+            "every revisit recorded a same-device comparison"
+        );
+        let est = store.m_estimate("user_agent", ua_prior);
+        assert!(
+            est < ua_prior,
+            "churning estimate {est} should fall below prior {ua_prior}"
+        );
     }
 }

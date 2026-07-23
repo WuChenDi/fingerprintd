@@ -78,6 +78,7 @@ impl AppState {
             record_ttl_ms: (config.fuzzy_record_ttl_secs > 0)
                 .then(|| config.fuzzy_record_ttl_secs.saturating_mul(1000)),
             max_frequency_values: Some(config.fuzzy_max_frequency_values),
+            max_agreement_components: Some(config.fuzzy_max_agreement_components),
             max_block: config.fuzzy_max_block,
         };
         Self {
