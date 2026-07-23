@@ -19,6 +19,14 @@ export interface Env {
   NONCE?: DurableObjectNamespace
   /** D1 fingerprint database. Unbound ⇒ the empty candidate stub. */
   DB?: D1Database
+  /** Check-in event D1 database (SEPARATE from `DB`). Unbound ⇒ the empty
+   *  check-in store stub (all-zero aggregates). */
+  CHECKIN_DB?: D1Database
+  /** Velocity Durable Object namespace for hot check-in fan-out counters. */
+  VELOCITY?: DurableObjectNamespace
+  /** Check-in retention window in seconds: events older than this are purged by
+   *  the scheduled cron. `0`/unset ⇒ check-in retention disabled. */
+  CHECKIN_RETENTION_SECS?: string
   /** Seeds the deterministic salt + MinHash family so blocking keys are stable
    *  across isolates (Worker Secret). Falls back to a dev-only placeholder. */
   FP_SALT_SECRET?: string
@@ -67,6 +75,8 @@ export interface EdgeConfig {
   adminKey?: string
   /** D1 retention window in milliseconds; `0` ⇒ retention disabled (no purge). */
   retentionMs: number
+  /** Check-in retention window in milliseconds; `0` ⇒ disabled (no purge). */
+  checkinRetentionMs: number
   /** Allowed CORS origins for the browser playground; `['*']` allows any.
    *  Empty ⇒ CORS disabled (no `Access-Control-*` headers emitted). */
   corsOrigins: string[]
@@ -118,6 +128,7 @@ export function resolveConfig(env: Env): EdgeConfig {
     trustEdgeHeaders: flag(env.FP_TRUST_EDGE_HEADERS),
     adminKey: secret(env.FP_ADMIN_KEY),
     retentionMs: intVar(env.FP_RETENTION_SECS, 0) * 1000,
+    checkinRetentionMs: intVar(env.CHECKIN_RETENTION_SECS, 0) * 1000,
     corsOrigins: originList(env.FP_CORS_ORIGINS),
   }
 }

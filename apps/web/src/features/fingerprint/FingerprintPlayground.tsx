@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { CheckinRiskCard } from './components/CheckinRiskCard'
 import { EmptyPipeline } from './components/EmptyPipeline'
 import { EvidenceLanes } from './components/EvidenceLanes'
 import { Hero } from './components/Hero'
@@ -12,6 +13,9 @@ export function FingerprintPlayground() {
   const status = useFingerprintStore((s) => s.status)
   const error = useFingerprintStore((s) => s.error)
   const result = useFingerprintStore((s) => s.result)
+  const checkinStatus = useFingerprintStore((s) => s.checkinStatus)
+  const checkinError = useFingerprintStore((s) => s.checkinError)
+  const checkin = useFingerprintStore((s) => s.checkin)
 
   return (
     <>
@@ -30,6 +34,20 @@ export function FingerprintPlayground() {
               identity={result.identity}
               original={result.original}
             />
+          )}
+          {result && checkinStatus === 'running' && (
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+              {t('Assessing check-in risk…')}
+            </div>
+          )}
+          {checkin && <CheckinRiskCard checkin={checkin} />}
+          {checkinStatus === 'error' && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <span className="font-semibold">
+                {t('Check-in assessment unavailable')}:{' '}
+              </span>
+              {checkinError}
+            </div>
           )}
         </div>
 

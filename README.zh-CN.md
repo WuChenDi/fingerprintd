@@ -105,7 +105,7 @@ const { identity } = await run({
 - **原生服务** —— [`crates/fingerprintd`](crates/fingerprintd),一个带内存存储的 Axum 服务。自托管从这里开始。
 - **无服务器边缘** —— [`apps/edge`](apps/edge/README.md),一个 Cloudflare Worker,用 Durable Object 存 nonce、用 D1 存指纹库。
 - **Playground** —— [`apps/web`](apps/web/README.md) 在浏览器里跑通整个流程,可视化客户端**发送**了什么、服务端**判定**了什么。
-- **签到风控层** —— [`apps/checkin-risk`](apps/checkin-risk/README.md) 建在 `/identify` 之上:它补上 fingerprintd 刻意不持有的账号/设备/IP/时序聚合,把一次判定转成用于每日签到反刷的 allow / challenge / deny 决策。
+- **签到风控判定** —— edge Worker 还提供 `POST /checkin/assess`,一个 config 门控层:补上 fingerprintd 刻意不持有的账号/设备/IP/时序聚合,把一次判定转成用于每日签到反刷的 allow / challenge / deny 决策;由 [playground](apps/web/README.md) 演示。
 
 ## 配置
 
@@ -139,9 +139,8 @@ crates/
 packages/
   client/           TypeScript 浏览器 SDK(FingerprintJS/BotD + 采集器)
 apps/
-  edge/             Cloudflare Worker(TS 宿主 + WASM 引擎 + Durable Object/D1)
-  web/              challenge/identify 流程的 React/Vite playground
-  checkin-risk/     建在 /identify 之上的签到反刷决策层
+  edge/             Cloudflare Worker:/identify + /checkin/assess(WASM 引擎 + Durable Object/D1)
+  web/              challenge / identify / 签到流程的 React/Vite playground
 DESIGN.md           架构 + 模糊匹配规格(双语)
 ```
 
@@ -159,13 +158,12 @@ cargo build --all-targets
 cargo deny check
 ```
 
-deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/ci.yml`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
+deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
 
 各组件工具链:
 
 - **SDK** —— `cd packages/client && bun run lint && bun run typecheck && bun run test`
-- **边缘 Worker** —— `cd apps/edge && bun run test`(miniflare 里的路由 + 状态 + parity)
-- **签到风控** —— `cd apps/checkin-risk && bun run test`
+- **边缘 Worker** —— `cd apps/edge && bun run test`(identify + 签到:miniflare 里的路由 / 状态 / parity / assess)
 - **Playground** —— `cd apps/web && bun run typecheck && bun run build`
 
 ## 设计

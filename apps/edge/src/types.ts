@@ -127,3 +127,42 @@ export interface ScoreOutcome {
   compared_components: number
   collision_risk: boolean
 }
+
+/**
+ * `POST /checkin/assess` request body.
+ *
+ * `accountId` is the core new dimension: the business identity the caller wants
+ * scored for check-in farming. `identify` is the fingerprintd verdict the caller
+ * already obtained and passes through. IP and timestamp are observed edge-side
+ * (never client-reported), so they are deliberately NOT fields here.
+ */
+export interface AssessRequest {
+  /** Business identity being assessed — the core new dimension. */
+  accountId: string
+  /** Scenario tag selecting a threshold profile. MVP: this value only. */
+  action: 'daily_checkin'
+  /** fingerprintd identify verdict, obtained and passed through by the caller. */
+  identify: IdentifyResponse
+}
+
+/** A single reason contributing to an {@link AssessResponse} decision. */
+export interface AssessReason {
+  /** Stable machine code for the reason, e.g. `NEW_DEVICE`. */
+  code: string
+  /** Human-readable explanation for logs/debugging. */
+  detail: string
+}
+
+/** `POST /checkin/assess` success body. */
+export interface AssessResponse {
+  /** Gate action the caller should take. */
+  decision: 'allow' | 'challenge' | 'deny'
+  /** Interpreted risk label. */
+  verdict: 'human' | 'suspicious' | 'farming'
+  /** Continuous risk score in `[0.0, 1.0]`. */
+  risk: number
+  /** Ordered reasons that produced the decision. */
+  reasons: AssessReason[]
+  /** The device identifier carried through from {@link IdentifyResponse}. */
+  visitorId: string
+}

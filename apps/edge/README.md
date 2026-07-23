@@ -79,7 +79,7 @@ src/
   index.ts                Worker entry — imports the .wasm, builds engine + state
                           per isolate, re-exports the nonce Durable Object
   app.ts                  Hono app (dependency-injected, unit-testable); Zod-
-                          validated POST /identify
+                          validated POST /identify and POST /checkin/assess
   engine.ts               typed wrapper around the FpEngine WASM class + one-time init
   state.ts                NonceStore / CandidateSource contracts + in-isolate stubs
   nonce-do.ts             NonceDurableObject (atomic burn) + DurableNonceStore adapter
@@ -90,6 +90,13 @@ src/
   types.ts                wire types, kept in sync with the server + browser SDK
   signature.ts            response-signature header names
   database/               drizzle-kit-generated D1 migrations (`wrangler d1 migrations apply`)
+  risk-engine.ts          pure check-in risk scoring (assess -> verdict)
+  risk-config.ts          per-action weights / thresholds / bands (defaultProfiles)
+  checkin-store-d1.ts     D1 append + windowed account/device/IP/time aggregates
+  checkin-state.ts        CheckinStore contract + empty (unbound) fallback
+  velocity-do.ts          VelocityDurableObject (hot counters; not on the MVP assess path)
+  checkin-db/             Drizzle schema + client for the checkin_events D1 (CHECKIN_DB)
+  checkin-database/       drizzle-kit-generated CHECKIN_DB migrations
 drizzle.config.ts         drizzle-kit config (schema -> src/database)
 wasm/                     vendored `wasm-pack --target web` build of crates/fp-wasm
 tests/
@@ -117,6 +124,9 @@ secrets are read at runtime — never embedded.
 | `FP_CORS_ORIGINS` (var) | comma-separated browser CORS origins (`*` = any); unset ⇒ CORS off | off |
 | `NONCE` (Durable Object) | one-time nonce store; unbound ⇒ in-isolate stub | — |
 | `DB` (D1) | fingerprint library + blocking index; unbound ⇒ empty stub | — |
+| `CHECKIN_DB` (D1) | check-in event log for `/checkin/assess`; unbound ⇒ empty stub | — |
+| `VELOCITY` (Durable Object) | hot velocity counters (check-in); not on the MVP assess path | — |
+| `CHECKIN_RETENTION_SECS` (var) | purge check-in events older than this; `0` ⇒ off | 0 |
 
 The three `FP_*` **secrets** are read at runtime and never embedded in the
 artifact. Provide them per environment:
@@ -133,6 +143,29 @@ without them falls back to the stubs (single-isolate nonce, every probe new).
 deterministic salt + MinHash family, so rotating it re-partitions the blocking
 index and orphans every stored template (all devices re-mint). Treat it as a
 long-lived deployment identity, not a routinely rotated credential.
+
+## Check-in risk (`POST /checkin/assess`)
+
+A config-gated layer on the same Worker that turns a fingerprintd verdict into a
+check-in anti-farming decision. It does **not** proxy `/identify` — the caller
+obtains the `IdentifyResponse` first and passes it through:
+
+```
+Req: { accountId, action: "daily_checkin", identify: <IdentifyResponse> }
+     ip / ts are edge-observed (cf-connecting-ip + server clock), never in the body
+200: { decision: "allow"|"challenge"|"deny",
+       verdict:  "human"|"suspicious"|"farming",
+       risk: 0.0..1.0, reasons: [{ code, detail }], visitorId }
+400: unknown top-level field (strict body) / bad shape
+```
+
+It records the event in `CHECKIN_DB`, derives windowed account/device/IP/time
+aggregates (device fan-out, account device count, new-device rate, IP sharing,
+timing regularity), and scores them with fingerprintd's hard signals through the
+pure `assess()` engine (`risk-engine.ts`; weights/thresholds in `risk-config.ts`).
+Unbound (`CHECKIN_DB` absent) it falls back to zero aggregates, so every request
+scores on the fingerprintd signals alone. The [playground](../web/README.md)
+demos the full identify → assess flow.
 
 ## Develop & verify
 

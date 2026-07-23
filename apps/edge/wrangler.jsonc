@@ -24,33 +24,55 @@
     "FP_TS_SKEW_SECS": "30",
     // Allowed browser CORS origins (comma-separated; `*` = any). Set to the web
     // playground deployment so it can call /challenge and /identify cross-origin.
-    "FP_CORS_ORIGINS": "https://fingerprintd.pages.dev"
+    "FP_CORS_ORIGINS": "https://fingerprintd.pages.dev",
+    // Check-in retention is off by default: set CHECKIN_RETENTION_SECS > 0 to have
+    // the scheduled cron purge old check-in events from CHECKIN_DB.
+    "CHECKIN_RETENTION_SECS": "0"
   },
-  // One-time nonce store: a Durable Object gives the atomic check-and-burn
-  // that D1/KV eventual consistency cannot. Bound as `env.NONCE`.
+  // Durable Objects: the one-time nonce store (atomic check-and-burn `env.NONCE`)
+  // and the hot check-in velocity counters (`env.VELOCITY`), each SQLite-backed.
   "durable_objects": {
     "bindings": [
       {
         "name": "NONCE",
         "class_name": "NonceDurableObject"
+      },
+      {
+        "name": "VELOCITY",
+        "class_name": "VelocityDurableObject"
       }
     ]
   },
-  // SQLite-backed Durable Object storage for the nonce class.
+  // SQLite-backed Durable Object storage. v1 for the nonce class; v2 adds the
+  // check-in velocity class.
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["NonceDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["VelocityDurableObject"]
     }
   ],
-  // Fingerprint library + blocking inverted index, bound as `env.DB`.
-  // Migrations live in ./src/database (drizzle-kit generate; applied with `wrangler d1 migrations apply`).
+  // Two SEPARATE D1 databases:
+  //   - `env.DB`         — fingerprint library + blocking index (src/database).
+  //   - `env.CHECKIN_DB` — check-in event log (src/checkin-database). Its
+  //     database_id is a placeholder; a real D1 is provisioned by a human.
+  // Migrations are generated with drizzle-kit and applied with
+  // `wrangler d1 migrations apply`.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "fingerprintd",
       "migrations_dir": "src/database",
       "database_id": "af4a17c8-0884-462b-9f86-6289eaddd21c"
+    },
+    {
+      "binding": "CHECKIN_DB",
+      "database_name": "checkin-risk",
+      "migrations_dir": "src/checkin-database",
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   // D1 retention purge: the `scheduled` handler in src/index.ts runs daily

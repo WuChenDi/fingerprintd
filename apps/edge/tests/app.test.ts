@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
+import { EmptyCheckinStore } from '../src/checkin-state'
 import type { Env } from '../src/config'
 import { resolveConfig } from '../src/config'
 import { EdgeEngine, initEngineRuntime } from '../src/engine'
@@ -32,6 +33,7 @@ function makeDeps(env: Env = {}): Deps {
     nonces: new InMemoryNonceStore(config.nonceTtlSecs),
     candidates: new EmptyCandidateSource(),
     config,
+    checkin: new EmptyCheckinStore(),
   }
 }
 

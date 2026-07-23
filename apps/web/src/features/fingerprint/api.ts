@@ -66,6 +66,58 @@ export interface FlowResult {
   original?: OriginalFingerprint
 }
 
+/** A single reason contributing to a check-in {@link AssessResponse}. */
+export interface AssessReason {
+  /** Stable machine code, e.g. `NEW_DEVICE`. */
+  code: string
+  /** Human-readable explanation. */
+  detail: string
+}
+
+/**
+ * `POST /checkin/assess` response — the anti-farming decision layered on top of
+ * a fingerprintd `IdentifyResponse` for a given business `accountId`.
+ */
+export interface AssessResponse {
+  /** Gate action to take. */
+  decision: 'allow' | 'challenge' | 'deny'
+  /** Interpreted risk label. */
+  verdict: 'human' | 'suspicious' | 'farming'
+  /** Continuous risk score in `[0.0, 1.0]`. */
+  risk: number
+  /** Ordered reasons that produced the decision. */
+  reasons: AssessReason[]
+  /** Echoed fingerprintd visitorId the decision was keyed on. */
+  visitorId: string
+}
+
+/**
+ * `POST {baseUrl}/checkin/assess` — score a check-in for farming, reusing the
+ * `IdentifyResponse` already obtained from `/identify` (the two are independent
+ * routes; identify is never re-run). `ip`/`ts` are observed server-side and are
+ * deliberately not sent. Throws on transport/HTTP errors.
+ */
+export async function assessCheckin(
+  baseUrl: string,
+  accountId: string,
+  identity: IdentifyResponse,
+): Promise<AssessResponse> {
+  const url = `${baseUrl.replace(/\/+$/, '')}/checkin/assess`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      accountId,
+      action: 'daily_checkin',
+      identify: identity,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(`POST /checkin/assess failed: ${response.status}`)
+  }
+  return (await response.json()) as AssessResponse
+}
+
 /**
  * Run `getChallenge -> collect -> identify`, verifying the response signature
  * when `signingKey` is a non-empty UTF-8 key. Throws on transport/HTTP errors.

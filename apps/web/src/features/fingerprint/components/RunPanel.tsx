@@ -16,9 +16,11 @@ export function RunPanel() {
   const { t } = useTranslation()
   const baseUrl = useFingerprintStore((s) => s.baseUrl)
   const signingKey = useFingerprintStore((s) => s.signingKey)
+  const accountId = useFingerprintStore((s) => s.accountId)
   const status = useFingerprintStore((s) => s.status)
   const setBaseUrl = useFingerprintStore((s) => s.setBaseUrl)
   const setSigningKey = useFingerprintStore((s) => s.setSigningKey)
+  const setAccountId = useFingerprintStore((s) => s.setAccountId)
   const run = useFingerprintStore((s) => s.run)
   const reset = useFingerprintStore((s) => s.reset)
 
@@ -59,6 +61,22 @@ export function RunPanel() {
             autoComplete="off"
             spellCheck={false}
           />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="accountId">{t('Account ID')}</Label>
+          <Input
+            id="accountId"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            placeholder="user-123"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Business account to score for check-in farming after identify succeeds.',
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={() => run()} disabled={running}>
