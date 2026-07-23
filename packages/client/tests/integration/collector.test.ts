@@ -1,5 +1,5 @@
 /**
- * FULL collector assembly (TC5). Proves `createCollector` composes the stable
+ * FULL collector assembly. Proves `createCollector` composes the stable
  * half + probe + `ts` into ONE payload and that `run()` forwards every field to
  * `/identify`, with `stable_components` and `probe` kept SEPARATE.
  *
@@ -77,7 +77,7 @@ describe('createCollector', () => {
 
     const collected = await collector(challengeWithVerify())
 
-    // Stable half: component adapted to the server schema (audit H5 — `ua` is an
+    // Stable half: component adapted to the server schema (`ua` is an
     // unmapped scalar, so the FJS `{ value }` wrapper is unwrapped), probe NOT
     // mixed in.
     expect(collected.stable_components.ua).toBe('Chrome/120')

@@ -1,5 +1,5 @@
 /**
- * The one-time nonce store as a Durable Object (PCF4).
+ * The one-time nonce store as a Durable Object.
  *
  * The native server keeps nonces in an in-process map with atomic check-and-burn
  * (`fp_core::nonce`). A Worker isolate cannot: it is ephemeral and unshared, and

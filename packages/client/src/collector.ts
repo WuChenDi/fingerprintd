@@ -1,17 +1,17 @@
 /**
- * The FULL {@link Collector} (TC5) — it composes the stable half plus the probe
+ * The FULL {@link Collector} — it composes the stable half plus the probe
  * and a client timestamp into the single evidence payload `run()` submits:
  *
  *   { stable_components, probe?, ts }
  *
  * DESIGN (architecture §4.1):
- *  - STABLE half (TC2, `createFingerprintCollector`) — the "who is this device"
+ *  - STABLE half (`createFingerprintCollector`) — the "who is this device"
  *    matching input.
- *  - PROBE (TC4 WASM, `wasmProbeFn`) — `hex(HMAC-SHA256(key, nonce))` (T8),
+ *  - PROBE (WASM, `wasmProbeFn`) — `hex(HMAC-SHA256(key, nonce))`,
  *    computed ONLY when the challenge advertises `collect.challenge.verify`
  *    (i.e. the server has a probe key configured). Kept SEPARATE from
  *    `stable_components`; it is NEVER a matching signal, only a freshness proof.
- *  - `ts` — the client clock at collection (T9).
+ *  - `ts` — the client clock at collection.
  *
  * Every backend is injectable so the whole assembly is testable without a real
  * browser or the WASM (there is no headless browser in this environment).

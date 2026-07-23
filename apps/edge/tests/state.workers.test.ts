@@ -7,7 +7,7 @@ import {
 import { DurableNonceStore } from '../src/nonce-do'
 import type { ScoreOutcome } from '../src/types'
 
-// The PCF4 state layer against the real runtime: the nonce Durable Object burns
+// The state layer against the real runtime: the nonce Durable Object burns
 // atomically, and the D1 store recalls + drifts templates. These run in
 // workerd/miniflare with the wrangler.jsonc bindings live — no fakes.
 

@@ -44,7 +44,7 @@ export interface Deps {
 const STABLE_PROBES = ['userAgent', 'languages', 'timezone', 'platform']
 /** Active challenge targets seeded with the nonce. */
 const CHALLENGE_TARGETS = ['canvas', 'audio']
-/** The fixed nonce-probe transform advertised under probe enforcement (T8). */
+/** The fixed nonce-probe transform advertised under probe enforcement. */
 const PROBE_DESCRIPTOR: ProbeDescriptor = {
   alg: 'HMAC-SHA256',
   input: 'nonce',
@@ -65,7 +65,7 @@ const CLAIMED_UA_KEYS = ['userAgent', 'user_agent', 'ua']
  * component object (nested keys unrestricted); `probe`/`ts` are optional depth
  * checks. The schema is `.strict()` — any UNKNOWN top-level key (e.g. a stray
  * `challenge_response`) is REJECTED with a `400`, mirroring the native
- * `deny_unknown_fields` (M6a/L1). This removes the former forward-compat
+ * `deny_unknown_fields`. This removes the former forward-compat
  * tolerance: a client must send exactly these fields.
  */
 const identifySchema = z
@@ -82,7 +82,7 @@ export function createApp(deps: Deps): Hono {
   const app = new Hono()
 
   // Browser CORS for the playground. Off unless origins are configured
-  // (`FP_CORS_ORIGINS`); when on, expose the T9 signature headers so the browser
+  // (`FP_CORS_ORIGINS`); when on, expose the signature headers so the browser
   // client can read them, and let the middleware answer preflight `OPTIONS`.
   const { corsOrigins } = deps.config
   if (corsOrigins.length > 0) {
@@ -104,7 +104,7 @@ export function createApp(deps: Deps): Hono {
   app.get('/challenge', async () => {
     const { nonce, ttlSecs } = await deps.nonces.issue()
     // Advertise the probe transform only when probe enforcement is on, so a
-    // probe-capable client knows to compute it (T8).
+    // probe-capable client knows to compute it.
     const verify = deps.config.probeKey ? PROBE_DESCRIPTOR : undefined
     const body: ChallengeResponse = {
       nonce,
@@ -125,7 +125,7 @@ export function createApp(deps: Deps): Hono {
       return unauthorized()
     }
 
-    // Depth check on top of the nonce (T8): require a correct probe when a probe
+    // Depth check on top of the nonce: require a correct probe when a probe
     // key is configured. A missing or forged probe is rejected before scoring.
     if (deps.config.probeKey) {
       if (!req.probe || !deps.engine.verifyProbe(req.nonce, req.probe)) {
@@ -135,7 +135,7 @@ export function createApp(deps: Deps): Hono {
 
     const now = Date.now()
 
-    // Timestamp window (T9): when enabled, require the client `ts` within the
+    // Timestamp window: when enabled, require the client `ts` within the
     // configured skew of server time. Fail-closed: missing/out-of-window ⇒ 401.
     if (deps.config.enforceTsWindow) {
       if (
@@ -178,7 +178,7 @@ export function createApp(deps: Deps): Hono {
     return signedJson(response, deps.config, deps.engine, now)
   })
 
-  // GDPR erasure (M6): remove every trace of a visitor. Fail-closed and
+  // GDPR erasure: remove every trace of a visitor. Fail-closed and
   // admin-gated — never exposed without an explicit key, never leaks existence.
   //   - no admin key configured ⇒ endpoint DISABLED ⇒ 404 (as if unrouted).
   //   - missing/wrong `Authorization: Bearer <key>` ⇒ 401 (constant-time compare).
@@ -284,7 +284,7 @@ function jsonResponse(body: unknown): Response {
 /**
  * Serialize the `/identify` body once and, when signing is enabled, attach the
  * `x-fp-timestamp` / `x-fp-signature` headers over those EXACT bytes so what is
- * signed equals what is sent (T9).
+ * signed equals what is sent.
  */
 function signedJson(
   response: IdentifyResponse,

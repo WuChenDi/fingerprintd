@@ -121,7 +121,7 @@ describe('POST /identify', () => {
     expect(body.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
   })
 
-  it('rejects an unknown top-level field with 400 (strict schema, M6a/L1)', async () => {
+  it('rejects an unknown top-level field with 400 (strict schema)', async () => {
     const deps = makeDeps()
     const { nonce } = await challenge(deps)
     // A stray `challenge_response` (or any extra top-level key) is no longer
@@ -156,7 +156,7 @@ describe('POST /identify', () => {
   })
 })
 
-describe('nonce-probe enforcement (T8)', () => {
+describe('nonce-probe enforcement', () => {
   const env: Env = { FP_PROBE_KEY: 'test-probe-secret' }
 
   it('accepts a correct probe and rejects a missing/forged one', async () => {
@@ -213,7 +213,7 @@ describe('nonce-probe enforcement (T8)', () => {
   })
 })
 
-describe('response signing (T9)', () => {
+describe('response signing', () => {
   it('omits signature headers when no signing key is configured', async () => {
     const deps = makeDeps()
     const { nonce } = await challenge(deps)
@@ -262,7 +262,7 @@ describe('response signing (T9)', () => {
   })
 })
 
-describe('timestamp window (T9)', () => {
+describe('timestamp window', () => {
   const env: Env = { FP_ENFORCE_TS_WINDOW: '1', FP_TS_SKEW_SECS: '30' }
 
   it('accepts a fresh ts and rejects stale/future/missing', async () => {
@@ -282,7 +282,7 @@ describe('timestamp window (T9)', () => {
   })
 })
 
-describe('passive signals (edge JA4/IP fusion, M2)', () => {
+describe('passive signals (edge JA4/IP fusion)', () => {
   // Shared JA4/UA vectors, identical to the native `signals` tests
   // (crates/fingerprintd/src/signals.rs) so the edge verdict is provably the same.
   /** A JA4 whose structural counts read as a real browser (15 ciphers, 16 ext). */
@@ -476,7 +476,7 @@ describe('CORS (browser playground)', () => {
     expect(resp.headers.get('access-control-allow-methods')).toContain('POST')
   })
 
-  it('reflects an allowed origin and exposes the T9 signature headers', async () => {
+  it('reflects an allowed origin and exposes the signature headers', async () => {
     const resp = await handleRequest(
       withOrigin('/challenge', ORIGIN),
       corsDeps(),

@@ -8,7 +8,7 @@ import {
 } from '../src/checkin-store-d1'
 
 // The storage layer against the real runtime: the D1 event log is seeded and the
-// PLAN-001 windowed aggregates are read back through workerd/miniflare with the
+// windowed aggregates are read back through workerd/miniflare with the
 // wrangler.jsonc `DB` binding live — no fakes.
 
 const HOUR = 60 * 60 * 1000

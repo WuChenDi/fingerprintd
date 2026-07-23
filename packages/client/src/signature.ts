@@ -1,5 +1,5 @@
 /**
- * Response-signature verification (T9).
+ * Response-signature verification.
  *
  * The server signs each `/identify` response as
  *   `hex(HMAC-SHA256(key, issued_ms.to_be_bytes() ++ body))`

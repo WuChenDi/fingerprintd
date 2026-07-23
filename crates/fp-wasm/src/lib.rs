@@ -69,7 +69,7 @@ const PROBE_KEY: &str = match option_env!("FP_PROBE_KEY") {
 /// Kept key-parametric so the native parity test can key it with the server's
 /// shared secret. HMAC accepts a key of any length, so keying is infallible in
 /// practice; `None` is returned only on the unreachable keying error rather than
-/// panicking (Lock 6).
+/// panicking.
 fn probe_with_key(key: &[u8], nonce: &str) -> Option<String> {
     let mut mac = Hmac::<Sha256>::new_from_slice(key).ok()?;
     mac.update(nonce.as_bytes());

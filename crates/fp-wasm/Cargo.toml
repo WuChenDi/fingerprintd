@@ -37,7 +37,7 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 hex  = { workspace = true }
 
-# Inherit the workspace lint policy (deny-warnings, clippy pedantic, Lock 6),
+# Inherit the workspace lint policy (deny-warnings, clippy pedantic),
 # but relax `unsafe_code` from `forbid` to `deny`: the `#[wasm_bindgen]` export
 # glue expands to `unsafe` FFI shims we do not write by hand. `deny` still bans
 # unsafe in our own source while permitting the generated boundary code.

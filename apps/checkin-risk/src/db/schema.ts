@@ -1,7 +1,7 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 // Check-in event log — the relationship-graph state fingerprintd deliberately
-// lacks (PLAN-001 §Aggregates). One append-only row per assessed check-in,
+// lacks. One append-only row per assessed check-in,
 // carrying only the three graph dimensions plus the edge-observed timestamp;
 // all farming signals are windowed `COUNT(DISTINCT ...)` aggregates over it
 // (see `src/checkin-store-d1.ts`). Hot atomic velocity counters that would

@@ -1,8 +1,8 @@
 /**
- * H5 CROSS-STACK ACCEPTANCE PROOF — the FingerprintJS→server-schema adapter
+ * CROSS-STACK ACCEPTANCE PROOF — the FingerprintJS→server-schema adapter
  * against the REAL matcher, headlessly (no browser).
  *
- * This proves the two halves of audit H5 end to end by running
+ * This proves the two halves of the adapter end to end by running
  * {@link adaptFingerprintComponents} output through the vendored `fp-wasm`
  * `FpEngine` — the SAME Rust matching core (`crates/fp-core`) the server runs:
  *
@@ -49,7 +49,7 @@ function fjsFixture(): Record<string, unknown> {
   }
 }
 
-describe('H5 adapter cross-stack proof (FpEngine)', () => {
+describe('adapter cross-stack proof (FpEngine)', () => {
   beforeAll(async () => {
     // Feed the raw bytes so the glue instantiates them directly (no URL fetch).
     await initWasm({ module_or_path: new Uint8Array(readFileSync(WASM_PATH)) })

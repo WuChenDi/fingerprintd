@@ -1,61 +1,74 @@
 # fingerprintd
 
-[English](README.md) · **中文**
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-一个**以服务端为准**的设备指纹服务,面向反欺诈与反自动化。客户端只负责**采集**证据;
-服务端签发一次性挑战,将证据与其指纹库进行模糊匹配,并返回
-`visitorId` + `confidence` + `decision`。身份从不在客户端计算,因此无法被伪造或重放。
+由**服务端**、而非浏览器决定"你是谁"的设备指纹服务。客户端只负责采集证据;服务端签发一次性 challenge、把证据与指纹库做模糊匹配,返回一个可信的 `visitorId`。身份从不在客户端计算,因此无法被伪造或重放。
 
-- **两种部署形态,同一套引擎。** 原生 [Axum 服务](crates/fingerprintd) 与
-  [Cloudflare Worker](apps/edge) 承载同一个计算核心
-  ([`crates/fp-core`](crates/fp-core),经 [`crates/fp-wasm`](crates/fp-wasm)
-  编译为 WASM);客户端无需改动即可对接任意一方。
-- **浏览器 SDK。** [`@cdlab/fingerprintd-client`](packages/client) 集成
-  FingerprintJS/BotD,在 WASM 中计算 nonce 新鲜度 probe 并提交 —— 它从不推导 id。
-- **技术栈。** 引擎与原生服务采用 Rust(edition 2024、`#![forbid(unsafe_code)]`);
-  SDK、边缘 Worker 与 playground 采用 TypeScript/Bun + Biome。
+```diff
+- const visitorId = await fingerprint()          // 在浏览器里计算 → 可伪造、可重放
++ const { identity } = await run({ baseUrl, collect })
++ // identity.visitorId  ← 由一次性 challenge 在服务端计算 → 权威可信
+```
 
-## 它做什么
+## 为什么
 
-在高风险动作(登录、注册、结账、优惠券核销)发生时,调用方会得到一个稳定的
-`visitorId` 和一个 `confidence`,供其风控引擎消费:这是不是一台新设备、它是否与某台
-已知设备一致,以及自我上报的浏览器 `signals` 是否与不可伪造的网络层信号(bot 检测)吻合。
+客户端指纹等于把算法交到攻击者手里。浏览器算出来的任何东西,一个有心的脚本都能重算、固定或重放 —— 于是你用来把关注册和下单的那个"稳定 id",只在客户端愿意诚实时才可信。
 
-它刻意**不**追求牢不可破的防御 —— L3 级对手可以伪造任意单一信号。其价值在于抬高伪造成本,
-并交叉核验多个信号的一致性。它是一个反欺诈工具,**而非**跨站追踪器。完整的设计理据、
-威胁模型与匹配引擎见 [`DESIGN.md`](DESIGN.zh-CN.md)。
+fingerprintd 把判定搬到服务端:
+
+- **服务端权威身份** —— 客户端提交原始信号(canvas、WebGL、字体、音频、UA…),由服务端派生 `visitorId`。伪造的客户端能在某个信号上撒谎,但铸造不出一个身份。
+- **一次性 challenge,用后即焚** —— 每次 `/identify` 都消耗一个短时效 nonce,被截获的请求无法重放。
+- **模糊匹配,而非哈希** —— 浏览器升级或换一个字体不该把一台设备分裂成新身份,两台相似设备也不该相撞。两阶段召回 + 概率打分吸收这种漂移。
+- **它伪造不了的交叉校验** —— 服务端把客户端自报的 UA 与它**自己观测到**的网络层 TLS 指纹(JA4)和 IP 风险对比。自报与实测的不一致,是客户端控制不了的机器人信号。
+- **一个引擎,两种部署** —— 同一个计算核心既作为原生 [Axum 服务](crates/fingerprintd)运行,也作为 [Cloudflare Worker](apps/edge) 运行。客户端对两者无感切换。
+
+它刻意**不**宣称牢不可破 —— 足够高级的对手能伪造任意单一信号。它的价值在于**抬高伪造成本**并对多个信号做一致性交叉校验。它是用于高风险动作(登录、注册、下单、优惠券核销)的反欺诈工具,**不是**跨站追踪器。
 
 ## 工作原理
 
 ```
-1. GET /challenge
-   server mints a one-time nonce (short TTL, single-use) and returns
-   it plus the collection plan
+1. GET /challenge          服务端铸造一次性 nonce(短 TTL、单次使用),
+                           连同采集计划一起返回
 
-2. client collects (packages/client):
-   - stable_components — canvas / webgl / fonts / audio / screen / UA …
-     (NO nonce mixed in) → the identity-matching input
-   - probe — hex(HMAC-SHA256(key, nonce)) computed in WASM
-     → a freshness proof, NEVER a matching signal (defense in depth)
+2. 客户端采集              stable_components —— canvas / webgl / 字体 / 音频 / UA …
+                           (不掺入 nonce)              → 身份匹配的输入
+                           probe —— hex(HMAC-SHA256(key, nonce)),在 WASM 中计算
+                                                        → 新鲜度证明,绝不作为匹配信号
 
-3. POST /identify  { nonce, stable_components, probe?, ts? }
-   server:
-     a. consume the nonce (burn-on-use)                    ← replay protection
-     b. blocking-key recall → Fellegi–Sunter scoring       ← de-avalanche, high precision
-     c. fuse passive JA4 / IP signals (UA↔TLS consistency) ← anti-forgery cross-check
-     → visitorId + confidence + decision (+ passive signals)
+3. POST /identify          服务端:烧掉 nonce(防重放)
+   { nonce,                        → blocking-key 召回 → Fellegi–Sunter 打分
+     stable_components,            → 融合被动 JA4 / IP 信号(UA↔TLS 一致性)
+     probe?, ts? }         → visitorId + confidence + decision(+ 被动信号)
 ```
 
-## 端点
+```mermaid
+flowchart LR
+    C["客户端 SDK"]
+    S["fingerprintd<br/>(Axum 或 Worker)"]
+    L["指纹库"]
 
-两套栈提供相同的传输契约;参见 [`DESIGN.md` 架构 §5](DESIGN.zh-CN.md#5-http-接口)。
+    C -- "GET /challenge" --> S
+    S -- "nonce + 采集计划" --> C
+    C -- "POST /identify<br/>{ nonce, stable_components }" --> S
+    S -- "召回 + 打分" --> L
+    L -- "候选集" --> S
+    S -- "visitorId + confidence + decision" --> C
+```
 
-| Endpoint        | Method | 用途                                           |
-| --------------- | ------ | ---------------------------------------------- |
-| `/health`       | GET    | 存活探测(`200 OK`)                            |
-| `/challenge`    | GET    | 签发一次性 nonce 挑战                          |
-| `/identify`     | POST   | 计算 `visitorId` + `confidence` + `decision`   |
-| `/visitor/{id}` | DELETE | GDPR 擦除 —— 删除一个访客(受 admin-key 门控) |
+`probe` 只证明请求是新鲜的;它**绝不**用于匹配身份 —— 这是刻意的拆分,好让泄露的 probe key 也无法左右身份判定。被动 JA4/IP 信号在服务端从连接层读取,**绝不**从客户端请求体接受。
+
+## 接口
+
+两种部署提供同一套线上契约。
+
+| 端点            | 方法   | 用途                                              |
+| --------------- | ------ | ------------------------------------------------- |
+| `/health`       | GET    | 存活探测(`200 OK`)                               |
+| `/challenge`    | GET    | 签发一次性 nonce challenge                        |
+| `/identify`     | POST   | 计算 `visitorId` + `confidence` + `decision`      |
+| `/visitor/{id}` | DELETE | GDPR 擦除 —— 删除一个 visitor(需 admin-key 门控) |
+
+`/identify` 返回 `{ visitorId, confidence, is_new_device, decision, collision_risk, signals }`。`decision` 为 `match` / `review` / `new_device` 之一;`confidence` 是 `[0,1]` 区间的**判定置信度**,不是身份可信度(一台全新设备可以打分很高却毫无历史 —— 请以 `is_new_device` / `decision` 为准来判断可信度)。
 
 ## 快速开始
 
@@ -64,109 +77,104 @@
 ```bash
 cargo run -p fingerprintd
 
-# override the bind address
+# 覆盖监听地址
 FINGERPRINTD_BIND_ADDR=0.0.0.0:9000 cargo run -p fingerprintd
 
-# probe liveness
+# 探测存活
 curl -i http://127.0.0.1:8080/health
 ```
 
-日志级别由 `RUST_LOG` 控制(默认为 `info`)。
+日志级别由 `RUST_LOG` 控制(默认 `info`)。
 
-若要从浏览器调用,请使用 SDK:
+用 SDK 从浏览器调用 —— 它集成 FingerprintJS + BotD,在 WASM 中计算 nonce probe 并提交。它从不派生 id:
 
 ```ts
 import { createCollector, run } from '@cdlab/fingerprintd-client'
 
 const { identity } = await run({
   baseUrl: 'https://fp.example.com',
-  collect: createCollector(),          // FingerprintJS + BotD + WASM probe
+  collect: createCollector(),
 })
 // identity: { visitorId, confidence, decision, is_new_device, collision_risk, signals }
 ```
 
-关于 Serverless 部署(Cloudflare Worker + Durable Object nonce + D1 指纹库),参见
-[`apps/edge`](apps/edge/README.md)。[playground](apps/web/README.md) 在浏览器中驱动完整流程,
-并可视化客户端发送的内容与服务端判定的结果之间的差异。
+## 部署目标
+
+同一个计算核心([`crates/fp-core`](crates/fp-core),经 [`crates/fp-wasm`](crates/fp-wasm) 编译为 WASM)支撑每一个目标,因此身份判定在各处完全一致:
+
+- **原生服务** —— [`crates/fingerprintd`](crates/fingerprintd),一个带内存存储的 Axum 服务。自托管从这里开始。
+- **无服务器边缘** —— [`apps/edge`](apps/edge/README.md),一个 Cloudflare Worker,用 Durable Object 存 nonce、用 D1 存指纹库。
+- **Playground** —— [`apps/web`](apps/web/README.md) 在浏览器里跑通整个流程,可视化客户端**发送**了什么、服务端**判定**了什么。
+- **签到风控层** —— [`apps/checkin-risk`](apps/checkin-risk/README.md) 建在 `/identify` 之上:它补上 fingerprintd 刻意不持有的账号/设备/IP/时序聚合,把一次判定转成用于每日签到反刷的 allow / challenge / deny 决策。
 
 ## 配置
 
-分层生效(优先级递增):内置默认值 → `fingerprintd.toml` →
-以 `FINGERPRINTD_` 为前缀的环境变量。
+原生服务按优先级从低到高配置:内置默认 → `fingerprintd.toml` → `FINGERPRINTD_` 前缀的环境变量。
 
-| Key                          | Env var                                   | Default          | 含义                                                                        |
+| 键                           | 环境变量                                  | 默认值           | 含义                                                                        |
 | ---------------------------- | ----------------------------------------- | ---------------- | --------------------------------------------------------------------------- |
 | `bind_addr`                  | `FINGERPRINTD_BIND_ADDR`                  | `127.0.0.1:8080` | 监听地址。                                                                  |
-| `nonce_ttl_secs`             | `FINGERPRINTD_NONCE_TTL_SECS`             | `30`             | 一次性 nonce 存活期,以 `expires_in` 对外公布。                             |
-| `trust_edge_headers`         | `FINGERPRINTD_TRUST_EDGE_HEADERS`         | `false`          | 是否信任边缘注入的被动信号 header(JA4/IP)。**故障关闭:** 仅在位于受信边缘之后时开启;可被直连的源站必须保持关闭。 |
+| `nonce_ttl_secs`             | `FINGERPRINTD_NONCE_TTL_SECS`             | `30`             | 一次性 nonce 时效,作为 `expires_in` 通告。                                 |
+| `trust_edge_headers`         | `FINGERPRINTD_TRUST_EDGE_HEADERS`         | `false`          | 是否信任边缘注入的被动信号头(JA4/IP)。**Fail-closed:**仅在可信边缘之后开启;可直连的源站必须关闭。 |
 | `probe_key`                  | `FINGERPRINTD_PROBE_KEY`                  | *(未设置)*       | 启用 nonce-probe 校验的 HMAC 密钥(纵深防御)。未设置则关闭。               |
 | `response_signing_key`       | `FINGERPRINTD_RESPONSE_SIGNING_KEY`       | *(未设置)*       | 启用 `/identify` 响应签名的 HMAC 密钥。未设置则关闭。                       |
-| `enforce_ts_window`          | `FINGERPRINTD_ENFORCE_TS_WINDOW`          | `false`          | 强制校验请求时间戳窗口。                                                    |
+| `enforce_ts_window`          | `FINGERPRINTD_ENFORCE_TS_WINDOW`          | `false`          | 是否强制请求时间戳窗口。                                                    |
 | `ts_skew_secs`               | `FINGERPRINTD_TS_SKEW_SECS`               | `30`             | 窗口开启时允许的时钟偏移。                                                  |
-| `admin_key`                  | `FINGERPRINTD_ADMIN_KEY`                  | *(未设置)*       | 门控 `DELETE /visitor/{id}` 的 Bearer 密钥。未设置则禁用擦除。             |
-| `retention_secs`             | `FINGERPRINTD_RETENTION_SECS`             | `0`              | 驱逐超过该年龄(秒)的存储记录。`0` 禁用清扫。                             |
-| `fuzzy_max_records`          | `FINGERPRINTD_FUZZY_MAX_RECORDS`          | `1000000`        | 最大不同访客数;超过上限时驱逐最早出现者。                                  |
-| `fuzzy_record_ttl_secs`      | `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`      | `0`              | 驱逐在该窗口内未再出现的记录。`0` 禁用 TTL。                               |
-| `fuzzy_max_block`            | `FINGERPRINTD_FUZZY_MAX_BLOCK`            | `1024`           | blocking 索引每个 block 的访客上限;超限的插入被丢弃。                     |
-| `fuzzy_max_frequency_values` | `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` | `1000000`        | 追踪的不同 `u_i` 频率值上限;超限的新值被丢弃。                            |
+| `admin_key`                  | `FINGERPRINTD_ADMIN_KEY`                  | *(未设置)*       | 门控 `DELETE /visitor/{id}` 的 Bearer 密钥。未设置则擦除接口禁用。         |
+| `retention_secs`             | `FINGERPRINTD_RETENTION_SECS`             | `0`              | 清除超过此年龄(秒)的记录。`0` 关闭清扫。                                  |
+| `fuzzy_max_records`          | `FINGERPRINTD_FUZZY_MAX_RECORDS`          | `1000000`        | 最大不同 visitor 数;超上限时淘汰最早见到的。                              |
+| `fuzzy_record_ttl_secs`      | `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`      | `0`              | 淘汰在此窗口内未再见到的记录。`0` 关闭 TTL。                               |
+| `fuzzy_max_block`            | `FINGERPRINTD_FUZZY_MAX_BLOCK`            | `1024`           | blocking 索引每块的 visitor 上限;超限的插入被丢弃。                       |
+| `fuzzy_max_frequency_values` | `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` | `1000000`        | 跟踪的不同频率值上限;超限的新值被丢弃。                                    |
 
-`probe_key` / `response_signing_key` / `admin_key` 这些控制项均为**故障关闭且默认关闭**
-—— 只有在其密钥被设置后,对应控制才会激活。内存容量上界宽裕且故障安全:小负载的行为与
-无界存储完全一致,且每次驱逐或丢弃都会被计数,绝不静默。这些上界仅适用于原生服务;
-无状态的边缘按请求处理。
-
-## 设计文档
-
-[`DESIGN.md`](DESIGN.zh-CN.md)([English](DESIGN.md))是权威规范 —— 架构(背景、威胁模型、
-挑战-响应拆分、被动信号信任边界、HTTP 契约、隐私与合规、部署目标)与模糊匹配引擎(两阶段
-blocking + Fellegi–Sunter 打分、漂移、冷启动、离线评估)。源码文档注释以
-`architecture §N` / `fuzzy-matching §N` 引用其章节编号。
+`probe_key` / `response_signing_key` / `admin_key` 这三项控制**默认 fail-closed 且关闭** —— 只有各自的密钥被设置后才激活。内存容量上限宽松且 fail-safe:小负载表现得与无界存储完全一致,每一次淘汰或丢弃都会被计数,绝不静默。这些上限只对原生服务生效;无状态的边缘是逐请求的。
 
 ## 项目结构
 
 ```
 crates/
-  fp-core/          framework-free compute + storage traits (shared engine)
-  fingerprintd/     native Axum server (challenge / identify / erasure)
-  fp-wasm/          Rust→WASM probe core + edge FpEngine
+  fp-core/          无框架的计算 + 存储 trait(共享引擎)
+  fingerprintd/     原生 Axum 服务(challenge / identify / 擦除)
+  fp-wasm/          Rust→WASM 的 probe 核心 + 边缘引擎
 packages/
-  client/           TypeScript browser SDK (FingerprintJS/BotD + collector)
+  client/           TypeScript 浏览器 SDK(FingerprintJS/BotD + 采集器)
 apps/
-  edge/             Cloudflare Worker (TS host + WASM engine + Durable Object/D1)
-  web/              React/Vite playground for the challenge/identify flow
-DESIGN.md           architecture + fuzzy-matching spec (bilingual)
+  edge/             Cloudflare Worker(TS 宿主 + WASM 引擎 + Durable Object/D1)
+  web/              challenge/identify 流程的 React/Vite playground
+  checkin-risk/     建在 /identify 之上的签到反刷决策层
+DESIGN.md           架构 + 模糊匹配规格(双语)
 ```
 
-`crates/fingerprintd/src/lib.rs` 暴露 `build_router() -> axum::Router`,
-这是挂载 HTTP 路由的唯一位置。
+`crates/fingerprintd/src/lib.rs` 暴露 `build_router() -> axum::Router`,是 HTTP 路由唯一的挂载点。
 
-## 构建与质量门禁
+## 构建与质量门
 
-完整绿灯(在 workspace 根目录运行):
+完整绿条(在工作区根目录运行):
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo nextest run --all-features          # or: cargo test --all-features
+cargo nextest run --all-features          # 或:cargo test --all-features
 cargo build --all-targets
 cargo deny check
 ```
 
-deny-warnings 策略定义在 `[workspace.lints]`;CI 运行相同的命令,
-外加 SDK 与边缘 Worker 的测试套件(`.github/workflows/ci.yml`)。两套 Rust/TS
-栈由一份在两侧共同执行的**共享 parity fixture** 约束到同一行为
-(参见 [`apps/edge/README.md`](apps/edge/README.md))。
+deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/ci.yml`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
 
 各组件工具链:
 
 - **SDK** —— `cd packages/client && bun run lint && bun run typecheck && bun run test`
-- **边缘 Worker** —— `cd apps/edge && bun run test`(在 miniflare 中跑 router + state + parity)
+- **边缘 Worker** —— `cd apps/edge && bun run test`(miniflare 里的路由 + 状态 + parity)
+- **签到风控** —— `cd apps/checkin-risk && bun run test`
 - **Playground** —— `cd apps/web && bun run typecheck && bun run build`
+
+## 设计
+
+[`DESIGN.md`](DESIGN.md)([English](DESIGN.md))是权威规格:架构(背景、威胁模型、新鲜度与身份的拆分、被动信号信任边界、HTTP 契约、隐私与合规、部署目标)与模糊匹配引擎(两阶段 blocking + Fellegi–Sunter 打分、漂移、冷启动、离线评估)。
 
 ## 安全
 
-漏洞上报政策见 [`SECURITY.md`](SECURITY.md)。随客户端 WASM/JS 一起分发的 probe 与
-响应签名密钥是**纵深防御,而非决定性控制** —— 一次性 nonce 与 TLS 仍是首要保证。
+漏洞报告策略见 [`SECURITY.md`](SECURITY.md)。随客户端 WASM/JS 一起发布的 probe 与响应签名密钥是**纵深防御,而非决定性控制** —— 一次性 nonce 与 TLS 仍是主要保证。
 
 ## 许可证
 

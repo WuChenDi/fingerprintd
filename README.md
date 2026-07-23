@@ -1,60 +1,65 @@
 # fingerprintd
 
-**English** · [中文](README.zh-CN.md)
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-A **server-authoritative** device-fingerprinting service for anti-fraud and
-anti-automation. The client only **collects** evidence; the server issues a
-one-time challenge, fuzzy-matches the evidence against its fingerprint library,
-and returns a `visitorId` + `confidence` + `decision`. The identity is never
-computed on the client, so it cannot be forged or replayed.
+Device fingerprinting where the **server**, not the browser, decides who you are. The client only gathers evidence; the server issues a one-time challenge, fuzzy-matches the evidence against its fingerprint library, and returns a `visitorId` you can trust. The identity is never computed on the client, so it can't be forged or replayed.
 
-- **Two deployment targets, one engine.** A native [Axum server](crates/fingerprintd)
-  and a [Cloudflare Worker](apps/edge) host the same compute core
-  ([`crates/fp-core`](crates/fp-core), compiled to WASM via
-  [`crates/fp-wasm`](crates/fp-wasm)); a client works against either unchanged.
-- **Browser SDK.** [`@cdlab/fingerprintd-client`](packages/client) integrates
-  FingerprintJS/BotD, computes the nonce freshness probe in WASM, and submits —
-  it never derives an id.
-- **Stack.** Rust (edition 2024, `#![forbid(unsafe_code)]`) for the engine and
-  native server; TypeScript/Bun + Biome for the SDK, edge Worker, and playground.
+```diff
+- const visitorId = await fingerprint()          // computed in the browser → forgeable, replayable
++ const { identity } = await run({ baseUrl, collect })
++ // identity.visitorId  ← computed server-side from a one-time challenge → authoritative
+```
 
-## What it does
+## Why
 
-At high-risk actions (login, signup, checkout, coupon redemption) the caller gets
-a stable `visitorId` and a `confidence` for its risk engine: is this a new device,
-is it consistent with a known device, and do the self-reported browser signals
-agree with the unforgeable network-layer signals (bot detection)?
+Client-side fingerprinting hands the attacker the algorithm. Whatever the browser computes, a determined script can recompute, pin, or replay — so the "stable id" you gate signups and checkouts on is only as honest as the client chooses to be.
 
-It deliberately does **not** aim for unbreakable defense — an L3 adversary can
-forge any single signal. Its value is raising the cost of forgery and cross-checking
-multiple signals for consistency. It is an anti-fraud tool, **not** a cross-site
-tracker. The full rationale, threat model, and matching engine live in
-[`DESIGN.md`](DESIGN.md).
+fingerprintd moves the decision to the server:
+
+- **Server-authoritative identity** — the client submits raw signals (canvas, WebGL, fonts, audio, UA…); the server derives the `visitorId`. A forged client can lie about a signal, but it can't mint an identity.
+- **One-time challenge, burned on use** — every `/identify` spends a short-lived nonce, so a captured request can't be replayed.
+- **Fuzzy matching, not a hash** — a browser upgrade or one font change shouldn't fork a device into a new identity, and two similar devices shouldn't collide. A two-stage recall + probabilistic score handles the drift.
+- **Cross-checks it can't forge** — the server compares the client's self-reported UA against the network-layer TLS fingerprint (JA4) and IP risk it observed itself. Self-report vs. observed disagreement is a bot signal the client never controls.
+- **One engine, two deployments** — the same compute core runs as a native [Axum server](crates/fingerprintd) and as a [Cloudflare Worker](apps/edge). A client works against either unchanged.
+
+It deliberately does **not** claim unbreakable defense — a sufficiently advanced adversary can forge any single signal. Its value is raising the cost of forgery and cross-checking multiple signals for consistency. It is an anti-fraud tool for high-risk actions (login, signup, checkout, coupon redemption), **not** a cross-site tracker.
 
 ## How it works
 
 ```
-1. GET /challenge
-   server mints a one-time nonce (short TTL, single-use) and returns
-   it plus the collection plan
+1. GET /challenge          server mints a one-time nonce (short TTL, single-use)
+                           and returns it plus the collection plan
 
-2. client collects (packages/client):
-   - stable_components — canvas / webgl / fonts / audio / screen / UA …
-     (NO nonce mixed in) → the identity-matching input
-   - probe — hex(HMAC-SHA256(key, nonce)) computed in WASM
-     → a freshness proof, NEVER a matching signal (defense in depth)
+2. client collects         stable_components — canvas / webgl / fonts / audio / UA …
+                           (NO nonce mixed in)        → the identity-matching input
+                           probe — hex(HMAC-SHA256(key, nonce)) computed in WASM
+                                                       → a freshness proof, never a matching signal
 
-3. POST /identify  { nonce, stable_components, probe?, ts? }
-   server:
-     a. consume the nonce (burn-on-use)                    ← replay protection
-     b. blocking-key recall → Fellegi–Sunter scoring       ← de-avalanche, high precision
-     c. fuse passive JA4 / IP signals (UA↔TLS consistency) ← anti-forgery cross-check
-     → visitorId + confidence + decision (+ passive signals)
+3. POST /identify          server: burn the nonce (replay protection)
+   { nonce,                        → blocking-key recall → Fellegi–Sunter score
+     stable_components,            → fuse passive JA4 / IP signals (UA↔TLS consistency)
+     probe?, ts? }         → visitorId + confidence + decision (+ passive signals)
 ```
+
+```mermaid
+flowchart LR
+    C["Client SDK"]
+    S["fingerprintd<br/>(Axum or Worker)"]
+    L["fingerprint<br/>library"]
+
+    C -- "GET /challenge" --> S
+    S -- "nonce + collection plan" --> C
+    C -- "POST /identify<br/>{ nonce, stable_components }" --> S
+    S -- "recall + score" --> L
+    L -- "candidates" --> S
+    S -- "visitorId + confidence + decision" --> C
+```
+
+The `probe` proves the request is fresh; it is **never** used to match identity — a deliberate split so a leaked probe key can't move the identity decision. Passive JA4/IP signals are read from the connection server-side and are never accepted from the client body.
 
 ## Endpoints
 
-Both stacks serve the same wire contract; see [`DESIGN.md` architecture §5](DESIGN.md#5-http-interface).
+Both deployments serve the same wire contract.
 
 | Endpoint        | Method | Purpose                                           |
 | --------------- | ------ | ------------------------------------------------- |
@@ -62,6 +67,8 @@ Both stacks serve the same wire contract; see [`DESIGN.md` architecture §5](DES
 | `/challenge`    | GET    | Issue a one-time nonce challenge                  |
 | `/identify`     | POST   | Compute `visitorId` + `confidence` + `decision`   |
 | `/visitor/{id}` | DELETE | GDPR erasure — remove a visitor (admin-key gated) |
+
+`/identify` returns `{ visitorId, confidence, is_new_device, decision, collision_risk, signals }`. `decision` is one of `match` / `review` / `new_device`; `confidence` is a decision confidence in `[0,1]`, not identity trust (a brand-new device can score high yet be entirely unestablished — key trust off `is_new_device` / `decision`).
 
 ## Quick start
 
@@ -79,27 +86,30 @@ curl -i http://127.0.0.1:8080/health
 
 Log level is controlled by `RUST_LOG` (defaults to `info`).
 
-To call it from a browser, use the SDK:
+Call it from a browser with the SDK — it integrates FingerprintJS + BotD, computes the nonce probe in WASM, and submits. It never derives an id:
 
 ```ts
 import { createCollector, run } from '@cdlab/fingerprintd-client'
 
 const { identity } = await run({
   baseUrl: 'https://fp.example.com',
-  collect: createCollector(),          // FingerprintJS + BotD + WASM probe
+  collect: createCollector(),
 })
 // identity: { visitorId, confidence, decision, is_new_device, collision_risk, signals }
 ```
 
-For the serverless deployment (Cloudflare Worker + Durable Object nonce + D1
-library) see [`apps/edge`](apps/edge/README.md). The
-[playground](apps/web/README.md) drives the whole flow in a browser and visualizes
-what the client sends vs. what the server judges.
+## Deployment targets
+
+One compute core ([`crates/fp-core`](crates/fp-core), compiled to WASM via [`crates/fp-wasm`](crates/fp-wasm)) backs every target, so the identity decision is identical across them:
+
+- **Native server** — [`crates/fingerprintd`](crates/fingerprintd), an Axum service with an in-memory store. Start here for self-hosting.
+- **Serverless edge** — [`apps/edge`](apps/edge/README.md), a Cloudflare Worker with a Durable Object nonce store and a D1 fingerprint library.
+- **Playground** — [`apps/web`](apps/web/README.md) drives the whole flow in a browser and visualizes what the client sends vs. what the server judges.
+- **Check-in risk layer** — [`apps/checkin-risk`](apps/checkin-risk/README.md) builds on `/identify`: it adds the account/device/IP/time aggregation fingerprintd deliberately doesn't hold, and turns a verdict into an allow / challenge / deny decision for daily check-in anti-farming.
 
 ## Configuration
 
-Layered (increasing priority): built-in defaults → `fingerprintd.toml` →
-`FINGERPRINTD_`-prefixed environment variables.
+The native server is configured lowest → highest priority: built-in defaults → `fingerprintd.toml` → `FINGERPRINTD_`-prefixed environment variables.
 
 | Key                          | Env var                                   | Default          | Meaning                                                                     |
 | ---------------------------- | ----------------------------------------- | ---------------- | --------------------------------------------------------------------------- |
@@ -115,40 +125,27 @@ Layered (increasing priority): built-in defaults → `fingerprintd.toml` →
 | `fuzzy_max_records`          | `FINGERPRINTD_FUZZY_MAX_RECORDS`          | `1000000`        | Max distinct visitors; oldest-seen is evicted over cap.                     |
 | `fuzzy_record_ttl_secs`      | `FINGERPRINTD_FUZZY_RECORD_TTL_SECS`      | `0`              | Evict records not seen within this window. `0` disables the TTL.            |
 | `fuzzy_max_block`            | `FINGERPRINTD_FUZZY_MAX_BLOCK`            | `1024`           | Per-block visitor cap for the blocking index; over-cap inserts are dropped. |
-| `fuzzy_max_frequency_values` | `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` | `1000000`        | Cap on distinct tracked `u_i` frequency values; new values over cap drop.   |
+| `fuzzy_max_frequency_values` | `FINGERPRINTD_FUZZY_MAX_FREQUENCY_VALUES` | `1000000`        | Cap on distinct tracked frequency values; new values over cap drop.         |
 
-The `probe_key` / `response_signing_key` / `admin_key` controls are **fail-closed
-and off by default** — a control activates only once its key is set. The in-memory
-capacity bounds are generous and fail-safe: a small workload behaves exactly like
-an unbounded store, and every eviction or drop is counted, never silent. These
-bounds apply to the native server only; the stateless edge is per-request.
-
-## Design
-
-[`DESIGN.md`](DESIGN.md) ([中文](DESIGN.zh-CN.md)) is the authoritative spec — the
-architecture (background, threat model, challenge-response split, passive-signal
-trust boundary, HTTP contract, privacy/compliance, deployment targets) and the
-fuzzy-matching engine (two-stage blocking + Fellegi–Sunter scoring, drift,
-cold-start, offline evaluation). Source doc-comments reference its section numbers
-as `architecture §N` / `fuzzy-matching §N`.
+The `probe_key` / `response_signing_key` / `admin_key` controls are **fail-closed and off by default** — a control activates only once its key is set. The in-memory capacity bounds are generous and fail-safe: a small workload behaves exactly like an unbounded store, and every eviction or drop is counted, never silent. These bounds apply to the native server only; the stateless edge is per-request.
 
 ## Project structure
 
 ```
 crates/
-  fp-core/          framework-free compute + storage traits (shared engine)
+  fp-core/          framework-free compute + storage traits (the shared engine)
   fingerprintd/     native Axum server (challenge / identify / erasure)
-  fp-wasm/          Rust→WASM probe core + edge FpEngine
+  fp-wasm/          Rust→WASM probe core + edge engine
 packages/
   client/           TypeScript browser SDK (FingerprintJS/BotD + collector)
 apps/
   edge/             Cloudflare Worker (TS host + WASM engine + Durable Object/D1)
   web/              React/Vite playground for the challenge/identify flow
+  checkin-risk/     check-in anti-farming decision layer over /identify
 DESIGN.md           architecture + fuzzy-matching spec (bilingual)
 ```
 
-`crates/fingerprintd/src/lib.rs` exposes `build_router() -> axum::Router`, the
-single place HTTP routes are mounted.
+`crates/fingerprintd/src/lib.rs` exposes `build_router() -> axum::Router`, the single place HTTP routes are mounted.
 
 ## Build & quality gate
 
@@ -162,22 +159,22 @@ cargo build --all-targets
 cargo deny check
 ```
 
-The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands
-plus the SDK and edge Worker suites (`.github/workflows/ci.yml`). The two Rust/TS
-stacks are held to one behavior by a shared **parity fixture** exercised on both
-sides (see [`apps/edge/README.md`](apps/edge/README.md)).
+The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/ci.yml`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
 
 Per-component tooling:
 
 - **SDK** — `cd packages/client && bun run lint && bun run typecheck && bun run test`
 - **Edge Worker** — `cd apps/edge && bun run test` (router + state + parity in miniflare)
+- **Check-in risk** — `cd apps/checkin-risk && bun run test`
 - **Playground** — `cd apps/web && bun run typecheck && bun run build`
+
+## Design
+
+[`DESIGN.md`](DESIGN.md) ([中文](DESIGN.zh-CN.md)) is the authoritative spec: the architecture (background, threat model, the freshness-vs-identity split, the passive-signal trust boundary, HTTP contract, privacy and compliance, deployment targets) and the fuzzy-matching engine (two-stage blocking + Fellegi–Sunter scoring, drift, cold start, offline evaluation).
 
 ## Security
 
-See [`SECURITY.md`](SECURITY.md) for the vulnerability-reporting policy. The probe
-and response-signing keys shipped in client WASM/JS are **defense in depth, not a
-decisive control** — the one-time nonce and TLS remain the primary guarantees.
+See [`SECURITY.md`](SECURITY.md) for the vulnerability-reporting policy. The probe and response-signing keys shipped in client WASM/JS are **defense in depth, not a decisive control** — the one-time nonce and TLS remain the primary guarantees.
 
 ## License
 

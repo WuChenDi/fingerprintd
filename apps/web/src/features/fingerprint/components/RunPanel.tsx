@@ -54,7 +54,7 @@ export function RunPanel() {
             value={signingKey}
             onChange={(e) => setSigningKey(e.target.value)}
             placeholder={t(
-              'UTF-8 signing key to verify the T9 response signature',
+              'UTF-8 signing key to verify the response signature',
             )}
             autoComplete="off"
             spellCheck={false}

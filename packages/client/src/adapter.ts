@@ -1,5 +1,5 @@
 /**
- * FingerprintJS → server-schema adapter (audit finding H5, part a).
+ * FingerprintJS → server-schema adapter (part a).
  *
  * PROBLEM: FingerprintJS `get()` returns each component as a nested
  * `{ value, duration }` wrapper keyed by FJS names (`hardwareConcurrency`,
@@ -18,7 +18,7 @@
  *  3. normalize each value to the storable kind the server expects, dropping
  *     anything it cannot store.
  *
- * SCOPE: H5 is the wrapper + key-name mismatch only. Some real FJS values
+ * SCOPE: this is the wrapper + key-name mismatch only. Some real FJS values
  * (webgl/canvas) are objects and so drop here — recovering that entropy needs a
  * per-field canonicalization pass, which is a documented follow-up, NOT this
  * unit. Wiring this adapter into `fingerprint.ts` and the cross-stack proof are
@@ -105,7 +105,7 @@ export function adaptFingerprintComponents(
         }
       } else if (isScalar(value)) {
         // Category/Numeric fields keep only scalars. Real FJS webgl/canvas
-        // values are objects and drop here — out of H5's scope (see file doc).
+        // values are objects and drop here — out of this adapter's scope (see file doc).
         mapped[target] = value
       }
     } else if (isScalar(value)) {

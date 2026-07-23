@@ -2,7 +2,7 @@
 
 A Cloudflare Worker that turns a fingerprintd identify verdict plus a business
 `accountId` into a check-in risk decision (`allow` / `challenge` / `deny`),
-targeting the daily check-in anti-farming scenario ("签到" / anti-刷).
+targeting the daily check-in anti-farming scenario.
 
 fingerprintd is a signal provider, not a fraud judge: it exposes a stable device
 identity and network cross-checks (UA↔TLS, IP-risk band) but holds no
@@ -10,8 +10,7 @@ account/device relationship state. This Worker owns exactly that missing
 dimension — the `accountId` and the account/device/IP/time relationship graph —
 and fuses fingerprintd's signals with its own aggregates into an explainable
 verdict. It does not modify or proxy fingerprintd (`crates/*`, `apps/edge`); it
-only consumes the existing `/identify` wire contract. See `docs/plan/PLAN-001.md`
-for the full design.
+only consumes the existing `/identify` wire contract.
 
 ## Contract
 
@@ -61,7 +60,7 @@ ip, ts)` via windowed `COUNT(DISTINCT ...)` queries (`src/checkin-store-d1.ts`):
 
 | Signal | Key | Window | Catches |
 |---|---|---|---|
-| `device_account_fanout` | visitorId → distinct(accountId) | 24h / 7d | device farm (群控) |
+| `device_account_fanout` | visitorId → distinct(accountId) | 24h / 7d | device farm |
 | `account_device_count` | accountId → distinct(visitorId) | 7d / 30d | account cultivation |
 | `account_new_device_rate` | accountId | last N events | fingerprint reset / emulator |
 | `ip_account_count` | ip → distinct(accountId) | 1h / 24h | datacenter / proxy batch |
@@ -94,7 +93,7 @@ Bands: `risk >= 0.7` → `deny` / `farming`; `>= 0.35` → `challenge` /
 The `deny` band is deliberately conservative — a single strong aggregate (e.g. a
 device farm at 0.6) is **challenged, not denied**, and a shared-egress benign
 case (high `ip_account_count` alone, 0.3) stays `allow`. This favours challenge
-over deny on corporate/campus NAT false positives (PLAN-001 §Risks); `reasons[]`
+over deny on corporate/campus NAT false positives; `reasons[]`
 carries the audit/appeal trail. A real device farm reaches `deny` only by
 combining signals (fan-out + datacenter egress = 0.9).
 

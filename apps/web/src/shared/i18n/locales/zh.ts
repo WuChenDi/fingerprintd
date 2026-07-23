@@ -16,8 +16,8 @@ export const zh: Record<string, string> = {
   // Run panel
   'Server base URL': '服务端 Base URL',
   'Signing key (optional)': '签名密钥（可选）',
-  'UTF-8 signing key to verify the T9 response signature':
-    '用于校验 T9 响应签名的 UTF-8 密钥',
+  'UTF-8 signing key to verify the response signature':
+    '用于校验响应签名的 UTF-8 密钥',
   'Run flow': '运行流程',
   'Running…': '运行中…',
   Reset: '重置',

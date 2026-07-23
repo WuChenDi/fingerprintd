@@ -29,7 +29,7 @@ hex = "0.4"
 # dev-only
 tower = { version = "0.5", features = ["util"] }
 
-# === Lock 4 — deny-warnings policy lives in the manifest (inherited by every member) ===
+# === Deny-warnings policy lives in the manifest (inherited by every member) ===
 [workspace.lints.rust]
 warnings                      = { level = "deny", priority = -2 }
 unsafe_code                   = "forbid"
@@ -40,7 +40,7 @@ elided_lifetimes_in_paths     = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# Lock 6 — no panic in runtime paths.
+# No panic in runtime paths.
 unwrap_used = "deny"
 expect_used = "deny"
 panic       = "deny"

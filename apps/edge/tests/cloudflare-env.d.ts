@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
 // Types for the `env` exposed by the miniflare-backed Workers test pool: the
-// PCF4 state bindings from wrangler.jsonc plus the migrations the setup file
+// state bindings from wrangler.jsonc plus the migrations the setup file
 // applies. Only the `*.workers.test.ts` suite (real workerd) uses these.
 //
 // pool-workers 0.18 types `env` as `Cloudflare.Env`, so the bindings are

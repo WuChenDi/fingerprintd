@@ -34,7 +34,7 @@ function ensureProbe(): Promise<void> {
   return probeReady
 }
 
-/** Response-signature (T9) summary for the UI. */
+/** Response-signature summary for the UI. */
 export interface SignatureInfo {
   /** The server sent both the timestamp and signature headers. */
   signed: boolean

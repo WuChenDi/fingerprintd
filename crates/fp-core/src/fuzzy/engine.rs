@@ -15,7 +15,7 @@
 //!
 //! Thresholds and priors here are **cold-start defaults**; the fuzzy-matching spec's offline
 //! evaluation (§10) tunes them against a labelled set. They are deliberately
-//! separated so the eval harness (T5) can grid-search without touching scoring.
+//! separated so the eval harness can grid-search without touching scoring.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -108,7 +108,7 @@ impl FuzzyStore {
     /// without updating it (anti-poisoning, §7); a new device is minted and
     /// stored. `now_ms` is Unix milliseconds for the stored timestamps.
     ///
-    /// **Atomicity (finding M1):** the evaluate-then-observe read-modify-write
+    /// **Atomicity:** the evaluate-then-observe read-modify-write
     /// runs under one per-store guard, so concurrent `identify` calls cannot
     /// interleave their `observe` between another call's `evaluate` and
     /// `observe`. Each backend guards only its own state, so without this seam
@@ -318,7 +318,7 @@ fn agreement_weight(m: f64, u: f64, sim: f64) -> f64 {
 /// The passive JA4/UA consistency input (fuzzy-matching §6) is a P2 signal, left
 /// neutral here.
 ///
-/// This is **decision confidence, not identity trust** (finding M3). A first-ever
+/// This is **decision confidence, not identity trust**. A first-ever
 /// device with no candidate is a confident `NewDevice` and can return a *high*
 /// confidence — it is confidently *new* — yet its identity is entirely
 /// unestablished. A downstream consumer must therefore key trust off
@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(store.record(&id).unwrap().last_seen, 9_000);
     }
 
-    /// (M1, concurrency) Many threads hammer `identify` against one shared store
+    /// (concurrency) Many threads hammer `identify` against one shared store
     /// with a mix of the same and distinct devices. `identify`'s evaluate +
     /// observe run under the per-store guard, so the concurrent read-modify-write
     /// stays atomic. The store must end in a consistent state: no panic, one

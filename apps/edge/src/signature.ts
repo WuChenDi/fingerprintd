@@ -1,5 +1,5 @@
 /**
- * Response-signature header names (T9).
+ * Response-signature header names.
  *
  * The Worker signs `/identify` responses via the WASM engine as
  *   `hex(HMAC-SHA256(key, issued_ms.to_be_bytes() ++ body))`

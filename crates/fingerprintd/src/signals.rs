@@ -21,7 +21,7 @@ pub const CF_CONNECTING_IP: &str = "cf-connecting-ip";
 /// Trusted request header carrying the client TLS JA4 fingerprint, injected by
 /// the Cloudflare edge (Bot Management → Transform Rule). The origin MUST strip
 /// any client-supplied copy and trust only the edge-injected value (architecture §4.2);
-/// that strip is wired at the handler/edge layer (T7), not here.
+/// that strip is wired at the handler/edge layer, not here.
 pub const JA4_HEADER: &str = "cf-bot-management-ja4";
 
 /// Extract the passive signals for a request from its trusted headers.

@@ -26,7 +26,7 @@
     // playground deployment so it can call /challenge and /identify cross-origin.
     "FP_CORS_ORIGINS": "https://fingerprintd.pages.dev"
   },
-  // One-time nonce store (PCF4): a Durable Object gives the atomic check-and-burn
+  // One-time nonce store: a Durable Object gives the atomic check-and-burn
   // that D1/KV eventual consistency cannot. Bound as `env.NONCE`.
   "durable_objects": {
     "bindings": [
@@ -43,7 +43,7 @@
       "new_sqlite_classes": ["NonceDurableObject"]
     }
   ],
-  // Fingerprint library + blocking inverted index (PCF4), bound as `env.DB`.
+  // Fingerprint library + blocking inverted index, bound as `env.DB`.
   // Migrations live in ./src/database (drizzle-kit generate; applied with `wrangler d1 migrations apply`).
   "d1_databases": [
     {
@@ -53,7 +53,7 @@
       "database_id": "af4a17c8-0884-462b-9f86-6289eaddd21c"
     }
   ],
-  // D1 retention purge (M6): the `scheduled` handler in src/index.ts runs daily
+  // D1 retention purge: the `scheduled` handler in src/index.ts runs daily
   // at 03:00 UTC, deleting templates older than FP_RETENTION_SECS (0/unset ⇒
   // no-op). Set FP_RETENTION_SECS in [vars] to enable retention.
   "triggers": {

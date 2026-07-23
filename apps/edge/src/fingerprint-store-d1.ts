@@ -1,5 +1,5 @@
 /**
- * The D1-backed fingerprint library (PCF4): stage-one candidate recall plus
+ * The D1-backed fingerprint library: stage-one candidate recall plus
  * drift persistence, the externalized form of `fp_core::fuzzy`'s in-memory
  * `RecordStore` + `BlockingIndex`.
  *
@@ -158,7 +158,7 @@ export class D1FingerprintStore implements CandidateSource {
   }
 
   /**
-   * GDPR erasure (M6): drop the visitor's template and all of its blocking-index
+   * GDPR erasure: drop the visitor's template and all of its blocking-index
    * rows in one atomic batch, so a subsequent recall cannot surface it.
    * Idempotent — an unknown id deletes zero rows and still succeeds, so the
    * caller never leaks whether the id existed.
@@ -173,7 +173,7 @@ export class D1FingerprintStore implements CandidateSource {
   }
 
   /**
-   * Retention purge (M6): delete every template last seen before `nowMs -
+   * Retention purge: delete every template last seen before `nowMs -
    * maxAgeMs` and their blocking-index rows, returning how many templates were
    * removed. `maxAgeMs <= 0` disables retention (returns 0 without touching the
    * table). Run from the scheduled cron (`index.ts`); also directly unit-tested.

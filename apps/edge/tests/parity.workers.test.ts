@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { IdentifyResponse } from '../src/types'
 import parityFixture from './fixtures/parity.json'
 
-// Edge half of the cross-stack parity proof (PCF5).
+// Edge half of the cross-stack parity proof.
 //
 // This drives the SAME `fixtures/parity.json` vectors as the native Rust test
 // (`crates/fingerprintd/tests/parity.rs`) through the full edge stack — the WASM

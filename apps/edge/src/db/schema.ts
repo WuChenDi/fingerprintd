@@ -49,7 +49,7 @@ export const blockingIndex = sqliteTable(
  * Per-value frequency material for the `u_i` rarity estimate (fuzzy-matching §9), keyed
  * by salted value hash so no plaintext component value is stored. Provisioned
  * here; unpopulated on the edge (the WASM `score` approximates `u_i` over the
- * recalled block — the PCF5 parity refinement).
+ * recalled block — the parity refinement).
  */
 export const valueFrequency = sqliteTable('value_frequency', {
   valueHash: text('value_hash').primaryKey(),

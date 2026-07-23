@@ -24,26 +24,26 @@ pub struct AppState {
     /// `false`, `/identify` ignores client-supplied `CF-Connecting-IP` /
     /// `cf-bot-management-ja4` copies (fail-closed).
     pub trust_edge_headers: bool,
-    /// Nonce-probe verifier (T8). `Some` only when a `probe_key` is configured;
+    /// Nonce-probe verifier. `Some` only when a `probe_key` is configured;
     /// then `/challenge` advertises the transform and `/identify` requires a
     /// correct probe. `None` disables probe enforcement (default).
     pub probe: Option<Arc<ProbeVerifier>>,
-    /// Response signer (T9). `Some` only when a `response_signing_key` is
+    /// Response signer. `Some` only when a `response_signing_key` is
     /// configured; then each `/identify` success carries `x-fp-timestamp` and
     /// `x-fp-signature` headers. `None` disables signing (default).
     pub signer: Option<Arc<ResponseSigner>>,
-    /// Whether to enforce the request timestamp window on `/identify` (T9). When
+    /// Whether to enforce the request timestamp window on `/identify`. When
     /// `false`, `ts` is ignored (default).
     pub enforce_ts_window: bool,
     /// Allowed clock skew, in milliseconds, for the request timestamp window when
-    /// `enforce_ts_window` is on (T9). Derived from `config.ts_skew_secs`.
+    /// `enforce_ts_window` is on. Derived from `config.ts_skew_secs`.
     pub ts_skew_ms: u64,
-    /// Admin credential gating the GDPR erasure endpoint (M6). `Some` only when a
+    /// Admin credential gating the GDPR erasure endpoint. `Some` only when a
     /// non-empty `admin_key` is configured; then `DELETE /visitor/{id}` is enabled
     /// and requires a matching `Authorization: Bearer` credential. `None` disables
     /// the endpoint entirely (fail-closed `404`).
     pub admin_key: Option<Arc<SecretKey>>,
-    /// Compliance retention window in milliseconds (M6): a record older than this
+    /// Compliance retention window in milliseconds: a record older than this
     /// by `last_seen` is purged by the background sweep. `0` disables the sweep.
     /// Derived from `config.retention_secs`.
     pub retention_ms: u64,
@@ -70,7 +70,7 @@ impl AppState {
             .as_ref()
             .filter(|key| key.is_configured())
             .map(|key| Arc::new(key.clone()));
-        // Bound in-memory fuzzy growth (finding H2). A `0` TTL means "off"
+        // Bound in-memory fuzzy growth. A `0` TTL means "off"
         // (unbounded); the caps are generous fail-safe defaults so a small
         // workload is unaffected.
         let policy = EvictionPolicy {

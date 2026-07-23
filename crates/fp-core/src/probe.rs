@@ -51,7 +51,7 @@ impl ProbeVerifier {
     /// This is the value a probe-capable client returns on `POST /identify`;
     /// exposed so the client — and tests — can derive it. HMAC accepts a key of
     /// any length, so keying is infallible in practice; `None` is returned only
-    /// on the unreachable keying error rather than panicking (Lock 6).
+    /// on the unreachable keying error rather than panicking.
     pub fn expected_hex(&self, nonce: &str) -> Option<String> {
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).ok()?;
         mac.update(nonce.as_bytes());

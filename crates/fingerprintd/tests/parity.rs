@@ -1,4 +1,4 @@
-//! Native half of the cross-stack parity proof (PCF5).
+//! Native half of the cross-stack parity proof.
 //!
 //! The native `fp-core` engine and the edge Worker (`apps/edge`: Rust→WASM
 //! compute over a Durable Object nonce + D1 candidate index) are two deployments

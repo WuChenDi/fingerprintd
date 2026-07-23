@@ -7,7 +7,7 @@
  * server renames `visitor_id` -> `visitorId` via serde; keep that here too.
  */
 
-/** Advertised nonce-probe transform (T8). Present in `GET /challenge` only when
+/** Advertised nonce-probe transform. Present in `GET /challenge` only when
  *  the Worker has a probe key configured; omitted otherwise. The client computes
  *  `encoding(alg(shared_key, input))` — `hex(HMAC-SHA256(key, nonce))` — and
  *  echoes it as {@link IdentifyRequest.probe}. The shared key is never advertised. */
@@ -52,18 +52,18 @@ export interface ChallengeResponse {
  * `POST /identify` request body.
  *
  * Only `nonce` and `stable_components` are always meaningful. The Worker reads
- * `probe` (T8) and `ts` (T9) only when the matching enforcement is configured;
- * otherwise they are ignored. The request schema is strict (M6a/L1): any unknown
+ * `probe` and `ts` only when the matching enforcement is configured;
+ * otherwise they are ignored. The request schema is strict: any unknown
  * top-level field is REJECTED with `400` — there is no forward-compat
  * `challenge_response` tolerance.
  */
 export interface IdentifyRequest {
   /** The nonce previously minted by `GET /challenge`. */
   nonce: string
-  /** Client timestamp in Unix milliseconds (T9). Checked only when the Worker's
+  /** Client timestamp in Unix milliseconds. Checked only when the Worker's
    *  timestamp window is enforced; a missing/out-of-window value then yields 401. */
   ts?: number
-  /** Nonce-probe response `hex(HMAC-SHA256(shared_key, nonce))` (T8). Verified
+  /** Nonce-probe response `hex(HMAC-SHA256(shared_key, nonce))`. Verified
    *  only when the Worker has a probe key; a missing/wrong value then yields 401. */
   probe?: string
   /** Raw stable components (no nonce mixed in). Arbitrary JSON — the engine
@@ -98,7 +98,7 @@ export interface IdentifyResponse {
   /** Stable device identifier (server-computed; serde-renamed from visitor_id). */
   visitorId: string
   /** Fused match confidence in `[0.0, 1.0]`. This is DECISION confidence, not
-   *  identity trust (M3): a first-ever new device can carry a HIGH confidence yet
+   *  identity trust: a first-ever new device can carry a HIGH confidence yet
    *  is entirely unestablished. Consumers must key trust off `is_new_device` /
    *  `decision`, never off `confidence` alone. */
   confidence: number

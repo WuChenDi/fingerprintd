@@ -43,7 +43,7 @@ use crate::{
 /// - `GET /health` — liveness probe, always `200 OK`.
 /// - `GET /challenge` — issue a one-time nonce (architecture §5).
 /// - `POST /identify` — consume the nonce and resolve the device.
-/// - `DELETE /visitor/{id}` — GDPR erasure, admin-key gated (finding M6).
+/// - `DELETE /visitor/{id}` — GDPR erasure, admin-key gated.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -62,7 +62,7 @@ async fn health() -> StatusCode {
 async fn challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
     let nonce = state.nonce_store.issue().await;
     // Advertise the nonce-probe transform only when probe enforcement is on, so
-    // a probe-capable client knows to compute it (T8, architecture §4.1 pt 3).
+    // a probe-capable client knows to compute it (architecture §4.1 pt 3).
     let verify = state.probe.as_ref().map(|_| ProbeDescriptor::advertised());
     Json(ChallengeResponse {
         collect: Collect {
@@ -97,7 +97,7 @@ async fn identify(
 ) -> Response {
     match state.nonce_store.consume(&req.nonce).await {
         NonceOutcome::Valid => {
-            // Depth check on top of the one-time nonce (T8, architecture §4.1 pt 3): when
+            // Depth check on top of the one-time nonce (architecture §4.1 pt 3): when
             // a probe key is configured, require a correct `probe` proving the
             // caller ran the advertised transform over this fresh nonce with the
             // shared key. A missing or forged probe is rejected before matching.
@@ -113,7 +113,7 @@ async fn identify(
 
             let now = now_ms();
 
-            // Timestamp window (T9, architecture §4.1): when enabled, bound how long a
+            // Timestamp window (architecture §4.1): when enabled, bound how long a
             // captured payload stays replayable by requiring the client `ts` to
             // sit within the configured skew of server time. Fail-closed once
             // enabled: a missing or out-of-window `ts` is rejected before matching.
@@ -169,7 +169,7 @@ async fn identify(
             };
             // Serialize once and, when signing is enabled, attach the signature
             // headers over those exact bytes so what is signed equals what is
-            // sent (T9). The JSON body shape is unchanged either way.
+            // sent. The JSON body shape is unchanged either way.
             signed_json(&response, state.signer.as_deref(), now)
         }
         rejected => {
@@ -180,7 +180,7 @@ async fn identify(
 }
 
 /// `DELETE /visitor/{id}` — erase a visitor from the fingerprint library (GDPR
-/// right-to-be-forgotten, finding M6, architecture §7).
+/// right-to-be-forgotten, architecture §7).
 ///
 /// **Fail-closed** auth:
 /// - No `admin_key` configured ⇒ the endpoint is disabled ⇒ `404 NOT_FOUND`.
@@ -254,18 +254,18 @@ fn now_ms() -> u64 {
 }
 
 /// Whether a client `ts` (Unix milliseconds) sits within `±skew_ms` of the
-/// server's `now_ms` (T9, architecture §4.1). Widened to `i128` so a future timestamp or
+/// server's `now_ms` (architecture §4.1). Widened to `i128` so a future timestamp or
 /// a pre-epoch clock cannot overflow or wrap the subtraction.
 fn ts_in_window(client_ts: i64, now_ms: u64, skew_ms: u64) -> bool {
     (i128::from(now_ms) - i128::from(client_ts)).abs() <= i128::from(skew_ms)
 }
 
 /// Build the `/identify` success response, attaching the signature headers when
-/// a [`ResponseSigner`] is configured (T9).
+/// a [`ResponseSigner`] is configured.
 ///
 /// The body is serialized once; the signer signs those exact bytes so the
 /// signature covers what is sent. On the unreachable serialization or response
-/// build error the handler fails with `500` rather than panicking (Lock 6).
+/// build error the handler fails with `500` rather than panicking.
 fn signed_json(
     response: &IdentifyResponse,
     signer: Option<&ResponseSigner>,
@@ -331,13 +331,13 @@ struct ChallengeProbe {
     seed: String,
     /// Probe targets to render.
     targets: Vec<String>,
-    /// Nonce-probe transform the client must compute and echo on `identify`
-    /// (T8). Present only when probe enforcement is enabled; omitted otherwise.
+    /// Nonce-probe transform the client must compute and echo on `identify`.
+    /// Present only when probe enforcement is enabled; omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     verify: Option<ProbeDescriptor>,
 }
 
-/// Advertised nonce-probe transform (T8, architecture §4.1 pt 3): the client computes
+/// Advertised nonce-probe transform (architecture §4.1 pt 3): the client computes
 /// `encoding(alg(shared_key, input))` — `hex(HMAC-SHA256(shared_key, nonce))` —
 /// and returns it as `probe`. The shared key is not advertised; only the
 /// transform is.
@@ -364,13 +364,13 @@ impl ProbeDescriptor {
 
 /// `POST /identify` request body.
 ///
-/// `deny_unknown_fields` (finding M6) rejects an unrecognized *top-level* key
+/// `deny_unknown_fields` rejects an unrecognized *top-level* key
 /// with `400`, so a caller cannot smuggle unmodeled fields; `stable_components`
 /// is a free-form [`Value`], so arbitrary *nested* component keys still pass.
 ///
-/// The `probe` field is the nonce-probe response (T8): verified only when a
+/// The `probe` field is the nonce-probe response: verified only when a
 /// probe key is configured, otherwise ignored. The `ts` field is the client's
-/// Unix-millisecond timestamp (T9): checked against the server clock only when
+/// Unix-millisecond timestamp: checked against the server clock only when
 /// `enforce_ts_window` is on, otherwise ignored.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -378,11 +378,11 @@ struct IdentifyRequest {
     /// The nonce previously minted by `GET /challenge`.
     nonce: String,
     /// Nonce-probe response: `hex(HMAC-SHA256(shared_key, nonce))`, as advertised
-    /// by `GET /challenge` (T8, architecture §4.1 pt 3). Required and verified only when a
+    /// by `GET /challenge` (architecture §4.1 pt 3). Required and verified only when a
     /// probe key is configured; a missing or wrong value then yields `401`.
     #[serde(default)]
     probe: Option<String>,
-    /// Client timestamp in Unix milliseconds (T9, architecture §4.1/§5). Required and
+    /// Client timestamp in Unix milliseconds (architecture §4.1/§5). Required and
     /// checked against `±ts_skew_secs` only when `enforce_ts_window` is on; a
     /// missing or out-of-window value then yields `401`. Ignored otherwise.
     #[serde(default)]
@@ -398,7 +398,7 @@ struct IdentifyResponse {
     #[serde(rename = "visitorId")]
     visitor_id: String,
     /// Fused match confidence in `[0.0, 1.0]` (fuzzy-matching §6). This is **decision
-    /// confidence, not identity trust** (finding M3): a first-ever `new_device`
+    /// confidence, not identity trust**: a first-ever `new_device`
     /// can report a high confidence (confidently unrecognized) while its identity
     /// is unestablished — key trust off `is_new_device` / `decision`, not this
     /// value alone.
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(third["is_new_device"], json!(true));
     }
 
-    // --- Passive-signal fusion (T7 / fuzzy-matching §6, architecture §4.2) ---
+    // --- Passive-signal fusion (fuzzy-matching §6, architecture §4.2) ---
 
     use crate::signals::{CF_CONNECTING_IP, JA4_HEADER};
 
@@ -755,7 +755,7 @@ mod tests {
         assert_eq!(untrusted["signals"]["ua_tls_consistent"], json!(true));
     }
 
-    // --- Nonce probe verification (T8 / architecture §4.1 pt 3) ---
+    // --- Nonce probe verification (architecture §4.1 pt 3) ---
 
     use crate::probe::{PROBE_ALG, ProbeVerifier};
 
@@ -864,7 +864,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    // --- Response signature + timestamp window (T9 / architecture §4.1) ---
+    // --- Response signature + timestamp window (architecture §4.1) ---
 
     use crate::signing::{ResponseSigner, SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER};
 
@@ -1017,7 +1017,7 @@ mod tests {
         assert!(!super::ts_in_window(2_001, 1_500, 500));
     }
 
-    // --- deny_unknown_fields (M6a) ---
+    // --- deny_unknown_fields ---
 
     #[tokio::test]
     async fn identify_rejects_unknown_top_level_field() {
