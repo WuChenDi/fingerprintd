@@ -129,6 +129,45 @@ impl Stability {
     }
 }
 
+/// A component's storage kind, driving how a raw value is represented (§3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Salted single-value hash.
+    Category,
+    /// Per-element salted hash set.
+    Set,
+    /// Bucketed integer.
+    Numeric,
+}
+
+/// Schema entry for one component name: its stored [`Kind`] (§3) and its
+/// [`Stability`] tier — the source of the `m_i` prior the scorer uses (§2/§9).
+#[derive(Debug, Clone, Copy)]
+pub struct FieldSpec {
+    /// Stability tier, source of the `m_i` prior (§2/§9).
+    pub stability: Stability,
+    /// How the value is stored (§3).
+    pub kind: Kind,
+}
+
+/// Classify a component name into its schema entry (fuzzy-matching §2 component table).
+///
+/// Unknown names default to a medium-stability category value.
+pub fn classify(name: &str) -> FieldSpec {
+    let (stability, kind) = match name {
+        "webgl" | "platform" | "timezone" | "audio" | "languages" => {
+            (Stability::High, Kind::Category)
+        }
+        "cpu_cores" | "device_memory" => (Stability::High, Kind::Numeric),
+        "fonts" | "plugins" => (Stability::Medium, Kind::Set),
+        "screen" => (Stability::Medium, Kind::Numeric),
+        "user_agent" => (Stability::Low, Kind::Category),
+        // "canvas" and unknown names fall through to the medium-category default.
+        _ => (Stability::Medium, Kind::Category),
+    };
+    FieldSpec { stability, kind }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Salt, Stability, jaccard};
@@ -166,5 +205,20 @@ mod tests {
     fn priors_follow_stability_tier() {
         assert!(Stability::High.m_prior() > Stability::Medium.m_prior());
         assert!(Stability::Medium.m_prior() > Stability::Low.m_prior());
+    }
+
+    #[test]
+    fn schema_maps_known_components() {
+        use super::{Kind, classify};
+        use crate::fuzzy::component::Stability;
+
+        assert_eq!(classify("user_agent").stability, Stability::Low);
+        assert_eq!(classify("webgl").stability, Stability::High);
+        assert_eq!(classify("fonts").kind, Kind::Set);
+        assert_eq!(classify("cpu_cores").kind, Kind::Numeric);
+        // Unknown -> medium-stability category default.
+        let unknown = classify("something_new");
+        assert_eq!(unknown.stability, Stability::Medium);
+        assert_eq!(unknown.kind, Kind::Category);
     }
 }
