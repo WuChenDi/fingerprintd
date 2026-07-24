@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { CheckinExamples } from './components/CheckinExamples'
 import { CheckinRiskCard } from './components/CheckinRiskCard'
 import { EmptyPipeline } from './components/EmptyPipeline'
 import { EvidenceLanes } from './components/EvidenceLanes'
@@ -65,6 +66,8 @@ export function FingerprintPlayground() {
           )}
         </div>
       </div>
+
+      <CheckinExamples />
     </>
   )
 }

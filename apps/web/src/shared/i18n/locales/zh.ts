@@ -111,4 +111,13 @@ export const zh: Record<string, string> = {
     '客户端采集稳定组件，并在 WASM 中计算 HMAC probe。',
   'Server judges the evidence and returns a verdict with confidence.':
     '服务端评判证据，返回带置信度的判定结果。',
+
+  // Check-in decision-band examples
+  'Check-in decision bands': '签到决策档位',
+  'What the anti-farming layer decides': '反刷量层如何裁决',
+  'Representative outcomes across the three decision bands — no live device farm required.':
+    '覆盖三档决策的代表性结果 —— 无需真实设备农场即可查看。',
+  'Returning human — allowed': '回访真人 —— 放行',
+  'Device churn — challenged': '设备频繁更替 —— 验证',
+  'Device farm — denied': '设备农场 —— 拒绝',
 }
