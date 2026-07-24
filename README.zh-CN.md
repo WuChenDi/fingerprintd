@@ -160,11 +160,15 @@ cargo deny check
 
 deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
 
-> **vendored WASM。** `apps/edge/wasm` 与 `packages/client/wasm` 是 [`crates/fp-wasm`](crates/fp-wasm) 的构建产物,**不提交进仓库**。全新 clone(或 `bun run clean`)之后,做任何 TypeScript 工作前先构建一次 —— `bun install` 本身就需要它们,因为仓库根的 `prepare` 会构建 SDK:
+> **vendored WASM。** `apps/edge/wasm` 与 `packages/client/wasm` 是 [`crates/fp-wasm`](crates/fp-wasm) 的构建产物,**不提交进仓库**。全新 clone(或 `bun run clean`)之后构建一次即可 —— SDK 与各 app 都会导入它们:
 >
 > ```bash
+> bun install          # 直接成功;WASM 就绪前会跳过 SDK 预构建
 > bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+> bun run build        # 此时才构建 SDK + apps
 > ```
+>
+> 需要 Rust 工具链和 `wasm-pack`(`cargo install wasm-pack`)。
 
 各组件工具链:
 

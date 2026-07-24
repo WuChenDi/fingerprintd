@@ -44,7 +44,7 @@
     "build:wasm": "bash scripts/build-wasm.sh",
     "clean": "bash scripts/clean.sh",
     "verify:edge": "bun scripts/verify-deploy.ts",
-    "prepare": "bun run --filter=./packages/* build"
+    "prepare": "bash scripts/prepare.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5"
