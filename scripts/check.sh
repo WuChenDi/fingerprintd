@@ -25,6 +25,13 @@ cargo deny check
 echo "==> WASM gate"
 cargo test -p fp-wasm
 
+# --- Vendored WASM ---------------------------------------------------------
+# The TS gate's `bun install` runs the repo-root `prepare` (SDK build), which
+# imports the vendored WASM under packages/client/wasm — build it first (it is a
+# build artifact, not committed).
+echo "==> Vendored WASM build"
+bash "$ROOT/scripts/build-wasm.sh"
+
 # --- TypeScript gate -------------------------------------------------------
 echo "==> TypeScript gate"
 cd "$ROOT/packages/client"

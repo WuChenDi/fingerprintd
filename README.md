@@ -107,6 +107,15 @@ One compute core ([`crates/fp-core`](crates/fp-core), compiled to WASM via [`cra
 - **Playground** — [`apps/web`](apps/web/README.md) drives the whole flow in a browser and visualizes what the client sends vs. what the server judges.
 - **Check-in risk decision** — the edge Worker also serves `POST /checkin/assess`, a config-gated layer that adds the account/device/IP/time aggregation fingerprintd deliberately doesn't hold and turns a verdict into an allow / challenge / deny decision for daily check-in anti-farming; the [playground](apps/web/README.md) demos it.
 
+CI deploys via the manual `deploy-edge` / `deploy-web` workflows. To deploy **from your machine** (rebuild WASM from source → build → push to Cloudflare), use `bun run deploy:cf [edge|web|all]`:
+
+```bash
+DRY_RUN=1 bun run deploy:cf edge          # build + wrangler dry-run, no account needed
+FP_PROBE_KEY=<key> bun run deploy:cf all   # real deploy (wrangler login or CLOUDFLARE_API_TOKEN)
+```
+
+`FP_PROBE_KEY` is baked into the WASM; for a probe-enforced deploy it must equal the Worker's runtime `FP_PROBE_KEY` secret. Runtime secrets are managed separately with `wrangler secret put`.
+
 ## Configuration
 
 The native server is configured lowest → highest priority: built-in defaults → `fingerprintd.toml` → `FINGERPRINTD_`-prefixed environment variables.
@@ -159,6 +168,23 @@ cargo deny check
 ```
 
 The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
+
+> **Vendored WASM.** `apps/edge/wasm` and `packages/client/wasm` are build outputs of [`crates/fp-wasm`](crates/fp-wasm) and are **not committed** — they're rebuilt from source on demand (only on a fresh clone or after `bun run clean`; a normal install never recompiles).
+>
+> - With a **Rust toolchain + `wasm-pack`** installed, a plain `bun install` builds them automatically:
+>
+>   ```bash
+>   bun install   # builds the WASM (if missing) + the SDK
+>   ```
+>
+> - **Without** the Rust toolchain, install still succeeds but skips the SDK prebuild — build the WASM once the toolchain is available:
+>
+>   ```bash
+>   bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+>   bun run build        # then builds the SDK + apps
+>   ```
+>
+> Install `wasm-pack` with `cargo install wasm-pack`.
 
 Per-component tooling:
 

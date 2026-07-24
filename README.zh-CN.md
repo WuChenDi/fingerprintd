@@ -107,6 +107,15 @@ const { identity } = await run({
 - **Playground** —— [`apps/web`](apps/web/README.md) 在浏览器里跑通整个流程,可视化客户端**发送**了什么、服务端**判定**了什么。
 - **签到风控判定** —— edge Worker 还提供 `POST /checkin/assess`,一个 config 门控层:补上 fingerprintd 刻意不持有的账号/设备/IP/时序聚合,把一次判定转成用于每日签到反刷的 allow / challenge / deny 决策;由 [playground](apps/web/README.md) 演示。
 
+CI 通过手动的 `deploy-edge` / `deploy-web` workflow 部署。要**从本机**部署(从源码重建 WASM → 构建 → 推送到 Cloudflare),用 `bun run deploy:cf [edge|web|all]`:
+
+```bash
+DRY_RUN=1 bun run deploy:cf edge          # 构建 + wrangler dry-run,无需账号
+FP_PROBE_KEY=<key> bun run deploy:cf all   # 真正部署(需 wrangler login 或 CLOUDFLARE_API_TOKEN)
+```
+
+`FP_PROBE_KEY` 会烘焙进 WASM;若要启用探针校验,它必须等于 Worker 运行时的 `FP_PROBE_KEY` secret。运行时 secret 单独用 `wrangler secret put` 管理。
+
 ## 配置
 
 原生服务按优先级从低到高配置:内置默认 → `fingerprintd.toml` → `FINGERPRINTD_` 前缀的环境变量。
@@ -159,6 +168,23 @@ cargo deny check
 ```
 
 deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
+
+> **vendored WASM。** `apps/edge/wasm` 与 `packages/client/wasm` 是 [`crates/fp-wasm`](crates/fp-wasm) 的构建产物,**不提交进仓库** —— 按需从源码重建(仅全新 clone 或 `bun run clean` 之后;正常安装不会重新编译)。
+>
+> - 装了 **Rust 工具链 + `wasm-pack`** 时,直接 `bun install` 会自动构建:
+>
+>   ```bash
+>   bun install   # 缺失时构建 WASM + SDK
+>   ```
+>
+> - **没有** Rust 工具链时,install 仍会成功、但跳过 SDK 预构建 —— 工具链就绪后手动构建一次:
+>
+>   ```bash
+>   bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+>   bun run build        # 之后构建 SDK + apps
+>   ```
+>
+> 用 `cargo install wasm-pack` 安装 wasm-pack。
 
 各组件工具链:
 
