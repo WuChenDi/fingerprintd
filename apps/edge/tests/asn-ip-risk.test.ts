@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { asnIpRisk } from '../src/asn-ip-risk'
+import { asnIpRisk } from '../src/lib/asn-ip-risk'
 
 describe('asnIpRisk', () => {
   it('flags a known hosting ASN as high', () => {

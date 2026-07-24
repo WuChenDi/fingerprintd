@@ -3,17 +3,26 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
-import type { CheckinStore } from '../src/checkin-state'
-import { EmptyCheckinStore, zeroAggregateResult } from '../src/checkin-state'
-import type { AggregateResult, CheckinEvent } from '../src/checkin-store-d1'
 import { resolveConfig } from '../src/config'
-import { EdgeEngine, initEngineRuntime } from '../src/engine'
-import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
+import { EmptyCandidateSource, InMemoryNonceStore } from '../src/lib/state'
 import type {
   AssessRequest,
   AssessResponse,
   IdentifyResponse,
-} from '../src/types'
+} from '../src/lib/types'
+import type { CheckinStore } from '../src/modules/checkin/checkin-state'
+import {
+  EmptyCheckinStore,
+  zeroAggregateResult,
+} from '../src/modules/checkin/checkin-state'
+import type {
+  AggregateResult,
+  CheckinEvent,
+} from '../src/modules/checkin/checkin-store-d1'
+import {
+  EdgeEngine,
+  initEngineRuntime,
+} from '../src/modules/fingerprint/engine'
 
 // `/checkin/assess` lives in the merged edge app, so a test drives the FULL
 // edge `Deps` (engine, nonces, candidates, config) with an injected check-in

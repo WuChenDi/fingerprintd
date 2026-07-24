@@ -77,27 +77,36 @@ time, so the **scoring input matches** even where the stored blob differs.
 ```
 src/
   index.ts                Worker entry — imports the .wasm, builds engine + state
-                          per isolate, re-exports the nonce Durable Object
-  app.ts                  Hono app (dependency-injected, unit-testable); Zod-
-                          validated POST /identify and POST /checkin/assess
-  engine.ts               typed wrapper around the FpEngine WASM class + one-time init
-  state.ts                NonceStore / CandidateSource contracts + in-isolate stubs
-  nonce-do.ts             NonceDurableObject (atomic burn) + DurableNonceStore adapter
-  fingerprint-store-d1.ts D1 recall + drift persistence via Drizzle (templates + index)
-  db/schema.ts            Drizzle schema (templates / blocking_index / value_frequency)
+                          per isolate, re-exports the nonce + velocity DOs
+  app.ts                  composition root: Hono app (dependency-injected,
+                          unit-testable) wiring CORS + the aggregate router
+  routes/index.ts         route aggregation — bare GET /health + mounts the two
+                          domain sub-routers
+  config/index.ts         resolve typed config + state bindings from env (schema/loader)
+  config/risk-config.ts   per-action check-in weights / thresholds / bands (defaultProfiles)
+  db/schema.ts            Drizzle schema barrel (re-exports both domains)
+  db/fingerprint.schema.ts  templates / blocking_index / value_frequency
+  db/checkin.schema.ts    checkin_events
   db/client.ts            Drizzle D1 client factory
-  config.ts               resolve typed config + state bindings from env
-  types.ts                wire types, kept in sync with the server + browser SDK
-  signature.ts            response-signature header names
-  database/               drizzle-kit-generated D1 migrations (`wrangler d1 migrations apply`)
-  risk-engine.ts          pure check-in risk scoring (assess -> verdict)
-  risk-config.ts          per-action weights / thresholds / bands (defaultProfiles)
-  checkin-store-d1.ts     D1 append + windowed account/device/IP/time aggregates
-  checkin-state.ts        CheckinStore contract + empty (unbound) fallback
-  velocity-do.ts          VelocityDurableObject (hot counters; not on the MVP assess path)
-  checkin-db/             Drizzle schema + client for the checkin_events D1 (CHECKIN_DB)
-  checkin-database/       drizzle-kit-generated CHECKIN_DB migrations
-drizzle.config.ts         drizzle-kit config (schema -> src/database)
+  drizzle/                drizzle-kit-generated D1 migrations (one set for the whole DB)
+  modules/fingerprint/
+    engine.ts             typed wrapper around the FpEngine WASM class + one-time init
+    fingerprint-store-d1.ts  D1 recall + drift persistence via Drizzle (templates + index)
+    fingerprint.routes.ts    GET /challenge, POST /identify (Zod), DELETE /visitor/:id
+    index.ts              module barrel (public surface)
+  modules/checkin/
+    checkin-state.ts      CheckinStore contract + empty (unbound) fallback
+    checkin-store-d1.ts   D1 append + windowed account/device/IP/time aggregates
+    risk-engine.ts        pure check-in risk scoring (assess -> verdict)
+    checkin.routes.ts     POST /checkin/assess (Zod)
+    index.ts              module barrel (public surface)
+  lib/types.ts            wire types, kept in sync with the server + browser SDK
+  lib/signature.ts        response-signature header names
+  lib/asn-ip-risk.ts      edge-only ASN → ip_risk band classifier
+  lib/state.ts            NonceStore / CandidateSource contracts + in-isolate stubs
+  lib/do/nonce-do.ts      NonceDurableObject (atomic burn) + DurableNonceStore adapter
+  lib/do/velocity-do.ts   VelocityDurableObject (hot counters; not on the MVP assess path)
+drizzle.config.ts         drizzle-kit config (schema -> src/db/schema.ts, out -> ./drizzle)
 wasm/                     vendored `wasm-pack --target web` build of crates/fp-wasm
 tests/
   app.test.ts             Node: Hono app contract + secret-gated paths over the WASM
@@ -123,8 +132,7 @@ secrets are read at runtime — never embedded.
 | `FP_TRUST_EDGE_HEADERS` (var) | trust edge-injected passive-signal headers | off |
 | `FP_CORS_ORIGINS` (var) | comma-separated browser CORS origins (`*` = any); unset ⇒ CORS off | off |
 | `NONCE` (Durable Object) | one-time nonce store; unbound ⇒ in-isolate stub | — |
-| `DB` (D1) | fingerprint library + blocking index; unbound ⇒ empty stub | — |
-| `CHECKIN_DB` (D1) | check-in event log for `/checkin/assess`; unbound ⇒ empty stub | — |
+| `DB` (D1) | single database — fingerprint library + blocking index + check-in event log; unbound ⇒ empty stub | — |
 | `VELOCITY` (Durable Object) | hot velocity counters (check-in); not on the MVP assess path | — |
 | `CHECKIN_RETENTION_SECS` (var) | purge check-in events older than this; `0` ⇒ off | 0 |
 
@@ -148,7 +156,7 @@ long-lived deployment identity, not a routinely rotated credential.
 
 The surfaced `signals.ip_risk` band fuses one edge-only source on top of the
 shared WASM verdict: Cloudflare's per-request ASN enrichment (`request.cf.asn` /
-`asOrganization`). A curated hosting/datacenter/VPN ASN set (`src/asn-ip-risk.ts`,
+`asOrganization`). A curated hosting/datacenter/VPN ASN set (`src/lib/asn-ip-risk.ts`,
 illustrative — swap for a real reputation feed) classifies the connecting
 network, and the two bands combine as `max(wasmBand, asnBand)` with `high` at the
 top: the ASN can only **raise** the band to `high`, never lower a `medium`/`high`
@@ -174,11 +182,12 @@ Req: { accountId, action: "daily_checkin", identify: <IdentifyResponse> }
 400: unknown top-level field (strict body) / bad shape
 ```
 
-It records the event in `CHECKIN_DB`, derives windowed account/device/IP/time
-aggregates (device fan-out, account device count, new-device rate, IP sharing,
-timing regularity), and scores them with fingerprintd's hard signals through the
-pure `assess()` engine (`risk-engine.ts`; weights/thresholds in `risk-config.ts`).
-Unbound (`CHECKIN_DB` absent) it falls back to zero aggregates, so every request
+It records the event in the check-in event log (the shared `DB`), derives
+windowed account/device/IP/time aggregates (device fan-out, account device count,
+new-device rate, IP sharing, timing regularity), and scores them with
+fingerprintd's hard signals through the pure `assess()` engine
+(`modules/checkin/risk-engine.ts`; weights/thresholds in `config/risk-config.ts`).
+Unbound (`DB` absent) it falls back to zero aggregates, so every request
 scores on the fingerprintd signals alone. The [playground](../web/README.md)
 demos the full identify → assess flow.
 
@@ -208,8 +217,8 @@ The `workers` test project (`*.workers.test.ts`) runs under
 `@cloudflare/vitest-pool-workers`, so the Durable Object burn, the D1
 recall/persist round-trips, **and** the parity vectors execute against the actual
 workerd runtime with the `wrangler.jsonc` bindings live — a fresh local D1 with
-`migrations/` applied. No Cloudflare account is needed; miniflare provides D1/DO
-locally.
+the `drizzle/` migrations applied. No Cloudflare account is needed; miniflare
+provides D1/DO locally.
 
 Apply migrations to a real (or persistent local) D1 with:
 
@@ -260,7 +269,7 @@ deploy needs no paid plan.
    ```
 
 2. **Apply migrations** to the remote database (the drizzle-kit output in
-   `src/database`):
+   `apps/edge/drizzle/`):
 
    ```bash
    bun run cf:remotedb   # wrangler d1 migrations apply fingerprintd --remote

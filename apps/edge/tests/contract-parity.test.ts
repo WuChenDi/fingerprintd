@@ -6,11 +6,11 @@ import {
 import {
   SIGNATURE_HEADER as EDGE_SIGNATURE_HEADER,
   SIGNATURE_TIMESTAMP_HEADER as EDGE_SIGNATURE_TIMESTAMP_HEADER,
-} from '../src/signature'
+} from '../src/lib/signature'
 
 // Cross-stack signing-contract parity (LIGHT).
 //
-// The signing header names are triplicated: `apps/edge/src/signature.ts`,
+// The signing header names are triplicated: `apps/edge/src/lib/signature.ts`,
 // `packages/client/src/signature.ts`, and the Rust wire literals
 // (`crates/fp-core/src/signing.rs`). The native server is the single source of
 // truth for what goes on the wire; the edge Worker and the browser client MUST

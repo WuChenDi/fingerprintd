@@ -12,10 +12,10 @@
  * burn, candidate recall, drift write-back) is the host's, so this stays pure.
  */
 
-import { FpEngine, initSync, passive_signals } from '../wasm/fp_wasm.js'
-import type { EdgeConfig } from './config'
-import type { Candidate } from './state'
-import type { PassiveVerdict, ScoreOutcome } from './types'
+import { FpEngine, initSync, passive_signals } from '../../../wasm/fp_wasm.js'
+import type { EdgeConfig } from '../../config'
+import type { Candidate } from '../../lib/state'
+import type { PassiveVerdict, ScoreOutcome } from '../../lib/types'
 
 /** One-time wasm-bindgen module init (the module is a process-wide singleton). */
 let initialized = false

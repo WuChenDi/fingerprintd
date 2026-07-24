@@ -13,9 +13,9 @@
  */
 
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import type { Db } from './checkin-db/client'
-import { getDb } from './checkin-db/client'
-import { checkinEvents } from './checkin-db/schema'
+import type { Db } from '../../db/client'
+import { getDb } from '../../db/client'
+import { checkinEvents } from '../../db/schema'
 
 /** One hour / one day in milliseconds — the units the windows below are cut in. */
 const HOUR_MS = 60 * 60 * 1000
@@ -52,7 +52,7 @@ export interface CheckinEvent {
  * The aggregate bundle returned by {@link D1CheckinStore.getAggregates}.
  * Top-level keys match the aggregate names EXACTLY so this is structurally
  * compatible with the canonical `Aggregates` type defined in parallel
- * (`src/risk-config.ts`); the endpoint reconciles the two. Every value is a plain
+ * (`src/config/risk-config.ts`); the endpoint reconciles the two. Every value is a plain
  * count / ratio — no thresholds or scores are applied here.
  */
 export interface AggregateResult {

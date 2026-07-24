@@ -26,7 +26,7 @@
     // playground deployment so it can call /challenge and /identify cross-origin.
     "FP_CORS_ORIGINS": "https://fingerprintd.pages.dev",
     // Check-in retention is off by default: set CHECKIN_RETENTION_SECS > 0 to have
-    // the scheduled cron purge old check-in events from CHECKIN_DB.
+    // the scheduled cron purge old check-in events from the D1 database.
     "CHECKIN_RETENTION_SECS": "0"
   },
   // Durable Objects: the one-time nonce store (atomic check-and-burn `env.NONCE`)
@@ -55,24 +55,16 @@
       "new_sqlite_classes": ["VelocityDurableObject"]
     }
   ],
-  // Two SEPARATE D1 databases:
-  //   - `env.DB`         — fingerprint library + blocking index (src/database).
-  //   - `env.CHECKIN_DB` — check-in event log (src/checkin-database). Its
-  //     database_id is a placeholder; a real D1 is provisioned by a human.
-  // Migrations are generated with drizzle-kit and applied with
+  // A single consolidated D1 database (`env.DB`): the fingerprint library +
+  // blocking index AND the check-in event log all live here, with one migration
+  // set (./drizzle). Migrations are generated with drizzle-kit and applied with
   // `wrangler d1 migrations apply`.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "fingerprintd",
-      "migrations_dir": "src/database",
-      "database_id": "af4a17c8-0884-462b-9f86-6289eaddd21c"
-    },
-    {
-      "binding": "CHECKIN_DB",
-      "database_name": "checkin-risk",
-      "migrations_dir": "src/checkin-database",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "migrations_dir": "./drizzle",
+      "database_id": "7b0d1ed4-8094-4f0f-aa46-6afa6e9f14c6"
     }
   ],
   // D1 retention purge: the `scheduled` handler in src/index.ts runs daily

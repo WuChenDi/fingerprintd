@@ -3,14 +3,20 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
-import { EmptyCheckinStore } from '../src/checkin-state'
 import type { Env } from '../src/config'
 import { resolveConfig } from '../src/config'
-import { EdgeEngine, initEngineRuntime } from '../src/engine'
-import { SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER } from '../src/signature'
-import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
-import type { ChallengeResponse, IdentifyResponse } from '../src/types'
-import type { NewDeviceVelocityStore } from '../src/velocity-do'
+import type { NewDeviceVelocityStore } from '../src/lib/do/velocity-do'
+import {
+  SIGNATURE_HEADER,
+  SIGNATURE_TIMESTAMP_HEADER,
+} from '../src/lib/signature'
+import { EmptyCandidateSource, InMemoryNonceStore } from '../src/lib/state'
+import type { ChallengeResponse, IdentifyResponse } from '../src/lib/types'
+import { EmptyCheckinStore } from '../src/modules/checkin/checkin-state'
+import {
+  EdgeEngine,
+  initEngineRuntime,
+} from '../src/modules/fingerprint/engine'
 
 /** Drive the Hono app with injected deps; state lives in `deps`, so a fresh app
  *  per call is fine (a shim over the pre-Hono `handleRequest(req, deps)`). */

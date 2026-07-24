@@ -17,8 +17,7 @@ import { defineConfig } from 'vitest/config'
 // `test.poolOptions.workers` shape was removed). Storage isolation is now
 // per-test-FILE (not per-test), so state suites reset D1 in `beforeEach`.
 export default defineConfig(async () => {
-  const migrations = await readD1Migrations('./src/database')
-  const checkinMigrations = await readD1Migrations('./src/checkin-database')
+  const migrations = await readD1Migrations('./drizzle')
   return {
     plugins: [
       cloudflareTest({
@@ -33,7 +32,6 @@ export default defineConfig(async () => {
           // asserts the coupling). In a real deployment this is a Worker Secret.
           bindings: {
             TEST_MIGRATIONS: migrations,
-            TEST_CHECKIN_MIGRATIONS: checkinMigrations,
             FP_SALT_SECRET: 'fp-parity-vector-secret',
           },
         },

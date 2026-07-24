@@ -13,18 +13,15 @@ import type { D1Migration } from 'cloudflare:test'
 declare global {
   namespace Cloudflare {
     interface Env {
-      /** D1 fingerprint database (created locally by miniflare). */
+      /** D1 database — fingerprint state + check-in event log (created locally
+       *  by miniflare). */
       DB: D1Database
-      /** D1 check-in event database (created locally by miniflare). */
-      CHECKIN_DB: D1Database
       /** Nonce Durable Object namespace. */
       NONCE: DurableObjectNamespace
       /** Velocity Durable Object namespace (hot check-in fan-out counters). */
       VELOCITY: DurableObjectNamespace
-      /** Fingerprint schema migrations, read at config time and applied in setup. */
+      /** Schema migrations, read at config time and applied in setup. */
       TEST_MIGRATIONS: D1Migration[]
-      /** Check-in schema migrations, read at config time and applied in setup. */
-      TEST_CHECKIN_MIGRATIONS: D1Migration[]
       /** Deterministic salt secret, pinned to the parity fixture's `salt_secret`
        *  so the cross-stack parity suite reproduces the native reference. */
       FP_SALT_SECRET: string
