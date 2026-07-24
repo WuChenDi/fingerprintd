@@ -21,6 +21,7 @@
 
 pub mod agreement;
 pub mod blocking;
+mod canonical;
 pub mod component;
 pub mod engine;
 // The offline evaluation harness replays fixtures through a random-salt store; it
@@ -34,6 +35,7 @@ pub mod velocity;
 
 pub use agreement::AgreementStore;
 pub use blocking::CandidateSource;
+pub use component::{FieldSpec, Kind, classify};
 pub use engine::{Decision, MatchOutcome};
 pub use frequency::FrequencyStore;
 pub use record::FingerprintStore;
@@ -45,12 +47,12 @@ use std::{
 };
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use self::{
     agreement::AgreementTable,
     blocking::{BlockingIndex, BlockingKey, DEFAULT_MAX_BLOCK},
-    component::{Salt, Stability, Stored},
+    canonical::{all_scalar_key, canonical_scalar, group_key, object_entries, value_to_i64},
+    component::{Salt, Stored},
     frequency::FrequencyTable,
     minhash::MinHashLsh,
     record::{FingerprintRecord, RecordStore},
@@ -401,122 +403,6 @@ impl FuzzyStore {
     }
 }
 
-/// A component's storage kind, driving how a raw value is represented (§3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    /// Salted single-value hash.
-    Category,
-    /// Per-element salted hash set.
-    Set,
-    /// Bucketed integer.
-    Numeric,
-}
-
-/// Schema entry for one component name: its stored [`Kind`] (§3) and its
-/// [`Stability`] tier — the source of the `m_i` prior the scorer uses (§2/§9).
-#[derive(Debug, Clone, Copy)]
-pub struct FieldSpec {
-    /// Stability tier, source of the `m_i` prior (§2/§9).
-    pub stability: Stability,
-    /// How the value is stored (§3).
-    pub kind: Kind,
-}
-
-/// Classify a component name into its schema entry (fuzzy-matching §2 component table).
-///
-/// Unknown names default to a medium-stability category value.
-pub fn classify(name: &str) -> FieldSpec {
-    let (stability, kind) = match name {
-        "webgl" | "platform" | "timezone" | "audio" | "languages" => {
-            (Stability::High, Kind::Category)
-        }
-        "cpu_cores" | "device_memory" => (Stability::High, Kind::Numeric),
-        "fonts" | "plugins" => (Stability::Medium, Kind::Set),
-        "screen" => (Stability::Medium, Kind::Numeric),
-        "user_agent" => (Stability::Low, Kind::Category),
-        // "canvas" and unknown names fall through to the medium-category default.
-        _ => (Stability::Medium, Kind::Category),
-    };
-    FieldSpec { stability, kind }
-}
-
-/// Iterate the object's entries, or nothing if `value` is not an object.
-fn object_entries(value: &Value) -> impl Iterator<Item = (&String, &Value)> {
-    value
-        .as_object()
-        .into_iter()
-        .flat_map(serde_json::Map::iter)
-}
-
-/// Canonicalize a scalar JSON value (string/bool/number) to a hashable string.
-fn canonical_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Null | Value::Array(_) | Value::Object(_) => None,
-    }
-}
-
-/// Coerce a numeric JSON value to `i64`, rounding floats.
-#[allow(clippy::cast_possible_truncation)] // fingerprint numerics (cores, memory) are small
-fn value_to_i64(value: &Value) -> Option<i64> {
-    value
-        .as_i64()
-        .or_else(|| value.as_f64().map(|f| f.round() as i64))
-}
-
-/// Length-prefixed digest of an ordered member group into one blocking key.
-///
-/// Returns `None` if any member is absent or is a set (sets recall via
-/// `MinHash` bands, not composite keys).
-fn group_key(
-    stored: &BTreeMap<String, Stored>,
-    namespace: &[u8],
-    members: &[&str],
-) -> Option<BlockingKey> {
-    let mut hasher = Sha256::new();
-    hasher.update(namespace);
-    for member in members {
-        let bytes = scalar_bytes(stored.get(*member)?)?;
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(&bytes);
-    }
-    Some(hasher.finalize().into())
-}
-
-/// Length-prefixed digest of every present scalar component into one catch-all
-/// blocking key (K0). Returns `None` when the map holds no scalar value (only
-/// sets, or nothing), since there is then no scalar identity to key on.
-///
-/// Names are folded in alongside values (the map iterates in sorted name order)
-/// so two probes collide here only when their scalar components match exactly.
-fn all_scalar_key(stored: &BTreeMap<String, Stored>) -> Option<BlockingKey> {
-    let mut hasher = Sha256::new();
-    hasher.update(b"K0");
-    let mut any = false;
-    for (name, value) in stored {
-        let Some(bytes) = scalar_bytes(value) else {
-            continue;
-        };
-        any = true;
-        hasher.update((name.len() as u64).to_le_bytes());
-        hasher.update(name.as_bytes());
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(&bytes);
-    }
-    any.then(|| hasher.finalize().into())
-}
-
-/// Keying bytes for a scalar stored value; `None` for set components.
-fn scalar_bytes(stored: &Stored) -> Option<Vec<u8>> {
-    match stored {
-        Stored::Category(hash) => Some(hash.to_vec()),
-        Stored::Numeric(n) => Some(n.to_le_bytes().to_vec()),
-        Stored::Set(_) => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{EvictionPolicy, FuzzyStore};
@@ -603,21 +489,6 @@ mod tests {
         let record = store.record("v1").unwrap();
         assert!(record.components.contains_key("webgl"));
         assert!(!record.components.contains_key("canvas"));
-    }
-
-    #[test]
-    fn schema_maps_known_components() {
-        use super::{Kind, classify};
-        use crate::fuzzy::component::Stability;
-
-        assert_eq!(classify("user_agent").stability, Stability::Low);
-        assert_eq!(classify("webgl").stability, Stability::High);
-        assert_eq!(classify("fonts").kind, Kind::Set);
-        assert_eq!(classify("cpu_cores").kind, Kind::Numeric);
-        // Unknown -> medium-stability category default.
-        let unknown = classify("something_new");
-        assert_eq!(unknown.stability, Stability::Medium);
-        assert_eq!(unknown.kind, Kind::Category);
     }
 
     #[test]
