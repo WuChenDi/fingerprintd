@@ -144,6 +144,21 @@ deterministic salt + MinHash family, so rotating it re-partitions the blocking
 index and orphans every stored template (all devices re-mint). Treat it as a
 long-lived deployment identity, not a routinely rotated credential.
 
+### Edge-only IP reputation (Cloudflare ASN)
+
+The surfaced `signals.ip_risk` band fuses one edge-only source on top of the
+shared WASM verdict: Cloudflare's per-request ASN enrichment (`request.cf.asn` /
+`asOrganization`). A curated hosting/datacenter/VPN ASN set (`src/asn-ip-risk.ts`,
+illustrative — swap for a real reputation feed) classifies the connecting
+network, and the two bands combine as `max(wasmBand, asnBand)` with `high` at the
+top: the ASN can only **raise** the band to `high`, never lower a `medium`/`high`
+WASM band. This catches a datacenter IP that sits outside fp-core's coarse
+`StaticIpIntel` CIDR table but belongs to a known hosting ASN. It is read **only**
+behind `FP_TRUST_EDGE_HEADERS` (same trust boundary as JA4/IP) — an untrusted
+origin never touches `cf` — and it is TS-only in `apps/edge`: `ip_risk` is a
+surfaced signal, not an identity input, so the cross-stack parity bytes are
+unchanged.
+
 ## Check-in risk (`POST /checkin/assess`)
 
 A config-gated layer on the same Worker that turns a fingerprintd verdict into a
