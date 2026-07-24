@@ -247,7 +247,8 @@ Req: {
   collision_risk: boolean,
   signals: {                    // for the risk engine; raw passive signals are never echoed
     ua_tls_consistent: boolean,
-    ip_risk: "low" | "medium" | "high"
+    ip_risk: "low" | "medium" | "high",
+    new_device_velocity: "low" | "medium" | "high"  // IP-keyed cross-session new-device rate
   }
 }
 401: nonce expired / reused, or an enforced probe / timestamp check failed
@@ -259,6 +260,15 @@ carries `x-fp-timestamp` + `x-fp-signature` (`hex(HMAC-SHA256(key, be64(issuedMs
 
 Passive signals (JA4/IP) are obtained server-side from the connection (§4.2) and
 are **never** accepted from the client body.
+
+`new_device_velocity` is an IP-keyed **cross-session** signal: how many new devices
+one client IP minted inside a trailing window. A high rate is the fresh-seed-per-launch
+farm's footprint — invisible to the per-session engine one request at a time — and
+downgrades decision confidence without touching the `visitorId`. Its window and
+thresholds are tuning placeholders. It is a risk band surfaced alongside `ip_risk`,
+never folded into identity. The stateful native server computes the real band; the
+stateless edge Worker holds no cross-session store and always reports the neutral
+`low`, mirroring how it treats an empty frequency/agreement store as neutral.
 
 ### DELETE /visitor/{id}
 

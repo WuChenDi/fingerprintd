@@ -77,6 +77,14 @@ export interface Signals {
   ua_tls_consistent: boolean
   /** Coarse IP risk band, e.g. `low` / `high`. */
   ip_risk: string
+  /** Cross-session new-device production-rate band for the client IP
+   *  (`low` / `medium` / `high`). The `/identify` response always populates it;
+   *  the edge is stateless and scores one request at a time with no cross-session
+   *  velocity store, so it always reports the neutral `'low'` — the native server
+   *  computes the real band. This mirrors how the edge treats an empty u_i/m_i
+   *  store as neutral. Optional so the check-in `assess` pass-through — which does
+   *  not consume it — can carry an identify body that omits it. */
+  new_device_velocity?: string
 }
 
 /**

@@ -30,12 +30,14 @@ pub mod eval;
 pub mod frequency;
 pub mod minhash;
 pub mod record;
+pub mod velocity;
 
 pub use agreement::AgreementStore;
 pub use blocking::CandidateSource;
 pub use engine::{Decision, MatchOutcome};
 pub use frequency::FrequencyStore;
 pub use record::FingerprintStore;
+pub use velocity::{VelocityBand, VelocityStore};
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -52,6 +54,7 @@ use self::{
     frequency::FrequencyTable,
     minhash::MinHashLsh,
     record::{FingerprintRecord, RecordStore},
+    velocity::VelocityTable,
 };
 
 /// Capacity / TTL bounds for the in-memory fuzzy backends.
@@ -84,6 +87,10 @@ pub struct EvictionPolicy {
     /// estimation (fuzzy-matching §9); `None` is unbounded. A new component name
     /// beyond the cap is dropped (already-tracked names keep counting).
     pub max_agreement_components: Option<usize>,
+    /// Cap on the number of *distinct* tracked keys (client IPs) for the
+    /// cross-session new-device velocity signal; `None` is unbounded. A new key
+    /// beyond the cap is dropped (already-tracked keys keep counting).
+    pub max_velocity_keys: Option<usize>,
     /// Per-block visitor cap for the blocking index (fuzzy-matching §4).
     pub max_block: usize,
 }
@@ -95,6 +102,7 @@ impl Default for EvictionPolicy {
             record_ttl_ms: None,
             max_frequency_values: Some(1_000_000),
             max_agreement_components: Some(1024),
+            max_velocity_keys: Some(1_000_000),
             max_block: DEFAULT_MAX_BLOCK,
         }
     }
@@ -121,6 +129,9 @@ pub struct FuzzyStore {
     /// Per-component agreement material for `m_i` estimation (§9): how often each
     /// component's stored value agreed across confirmed same-device revisits.
     agreement: Box<dyn AgreementStore>,
+    /// Per-key new-device event material for the cross-session velocity signal:
+    /// how many new devices each client IP produced within the trailing window.
+    velocity: Box<dyn VelocityStore>,
     /// Serializes the [`FuzzyStore::identify`] read-modify-write so its
     /// evaluate-then-observe critical section is atomic.
     ///
@@ -182,6 +193,7 @@ impl FuzzyStore {
             agreement: Box::new(AgreementTable::with_capacity(
                 policy.max_agreement_components,
             )),
+            velocity: Box::new(VelocityTable::with_capacity(policy.max_velocity_keys)),
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -201,6 +213,7 @@ impl FuzzyStore {
             minhash: MinHashLsh::from_seed(secret),
             frequency: Box::new(FrequencyTable::new()),
             agreement: Box::new(AgreementTable::new()),
+            velocity: Box::new(VelocityTable::new()),
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -210,11 +223,11 @@ impl FuzzyStore {
     /// [`FuzzyStore::new`] and [`FuzzyStore::deterministic`] wire the in-memory
     /// defaults ([`RecordStore`], [`BlockingIndex`], [`FrequencyTable`],
     /// [`AgreementTable`]), which remain the only shipped backend. This
-    /// constructor lets a caller swap any of the four storage backends for an
+    /// constructor lets a caller swap any of the five storage backends for an
     /// alternate implementation of [`FingerprintStore`] / [`CandidateSource`] /
-    /// [`FrequencyStore`] / [`AgreementStore`] (an externalized index, a test
-    /// double) while keeping the same salt and `MinHash` family so key derivation
-    /// is unchanged.
+    /// [`FrequencyStore`] / [`AgreementStore`] / [`VelocityStore`] (an externalized
+    /// index, a test double) while keeping the same salt and `MinHash` family so
+    /// key derivation is unchanged.
     pub fn from_backends(
         salt: Salt,
         minhash: MinHashLsh,
@@ -222,6 +235,7 @@ impl FuzzyStore {
         blocking: Box<dyn CandidateSource>,
         frequency: Box<dyn FrequencyStore>,
         agreement: Box<dyn AgreementStore>,
+        velocity: Box<dyn VelocityStore>,
     ) -> Self {
         Self {
             salt,
@@ -230,6 +244,7 @@ impl FuzzyStore {
             minhash,
             frequency,
             agreement,
+            velocity,
             identify_lock: std::sync::Mutex::new(()),
         }
     }
@@ -715,6 +730,7 @@ mod tests {
             Box::new(super::BlockingIndex::new()),
             Box::new(super::FrequencyTable::new()),
             Box::new(super::AgreementTable::new()),
+            Box::new(super::VelocityTable::new()),
         );
 
         // A direct observation writes through the swapped backend...
