@@ -83,13 +83,61 @@ export class VelocityDurableObject {
 }
 
 /**
+ * The cross-session new-device velocity surface the `/identify` path consumes:
+ * distinct new devices minted for an IP (or JA4 shape class) inside the rolling
+ * window. {@link VelocityStore} implements it over the DO; a unit test injects a
+ * fake. Kept structural so the router never depends on the concrete DO class.
+ */
+export interface NewDeviceVelocityStore {
+  /** Distinct new devices minted for `ip` within `windowMs`. */
+  newDeviceVelocityIp(
+    ip: string,
+    visitorId: string,
+    windowMs: number,
+  ): Promise<number>
+  /** Distinct new devices minted for a JA4 shape `class` within `windowMs`. */
+  newDeviceVelocityJa4(
+    ja4Class: string,
+    visitorId: string,
+    windowMs: number,
+  ): Promise<number>
+}
+
+/**
  * Host adapter presenting the hot velocity counters over the
  * {@link VelocityDurableObject} binding. Each entity is addressed by
  * `idFromName(scope + ':' + key)`, so a device's fan-out and an IP's velocity
  * route to independent instances.
  */
-export class VelocityStore {
+export class VelocityStore implements NewDeviceVelocityStore {
   constructor(private readonly namespace: DurableObjectNamespace) {}
+
+  /**
+   * Distinct new devices minted for `ip` within `windowMs` — the hot-path,
+   * edge-side form of the per-IP new-device velocity (`fp_core::fuzzy::velocity`).
+   * A `NewDevice` verdict always mints a fresh `visitorId`, so the distinct-member
+   * count of visitorIds seen for the IP equals fp-core's new-device event count.
+   */
+  async newDeviceVelocityIp(
+    ip: string,
+    visitorId: string,
+    windowMs: number,
+  ): Promise<number> {
+    return this.bump(`nv:${ip}`, visitorId, windowMs)
+  }
+
+  /**
+   * Distinct new devices minted for a JA4 shape `class` within `windowMs` — the
+   * secondary per-JA4-class new-device velocity (HARDEN-002). Namespaced `nvja4:`
+   * so a class string can never collide with an `nv:` IP key in the shared store.
+   */
+  async newDeviceVelocityJa4(
+    ja4Class: string,
+    visitorId: string,
+    windowMs: number,
+  ): Promise<number> {
+    return this.bump(`nvja4:${ja4Class}`, visitorId, windowMs)
+  }
 
   /**
    * Distinct accounts seen on `visitorId` within `windowMs` — the hot-path form

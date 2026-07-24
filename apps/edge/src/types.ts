@@ -85,6 +85,14 @@ export interface Signals {
    *  store as neutral. Optional so the check-in `assess` pass-through — which does
    *  not consume it — can carry an identify body that omits it. */
   new_device_velocity?: string
+  /** Secondary cross-session new-device band keyed on the coarse JA4 shape
+   *  **class** (`low` / `medium` / `high`), mirroring the native
+   *  `new_device_velocity_ja4`. Surfaced additively alongside
+   *  {@link Signals.new_device_velocity}; computed edge-side from the same
+   *  Durable Object on a `new_device` verdict when a trusted JA4 is present,
+   *  else the neutral `'low'`. Surface-only — it never moves confidence. Optional
+   *  for the same pass-through reason as {@link Signals.new_device_velocity}. */
+  new_device_velocity_ja4?: string
 }
 
 /**

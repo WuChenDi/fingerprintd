@@ -48,12 +48,34 @@ const BROWSER_MIN_EXTENSIONS: u32 = 10;
 /// Curated set of `JA4_a` structural shapes that real browsers share, each a
 /// `(protocol, tls_version, sni, alpn)` tuple — the coarse structural signature
 /// deliberately *without* the exact cipher/extension counts (which an automation
-/// stack can pad). Modern Chrome/Firefox/Edge/Safari all negotiate TLS 1.3
-/// (`tls_version = 13`), send the SNI (`sni = d`), and advertise HTTP/2
-/// (`alpn = h2`) over TCP (`protocol = t`). This is a coarse curated placeholder
-/// in the spirit of [`StaticIpIntel`], **not** a real JA4 fingerprint database
-/// (future TODO — real JA4 fingerprint database, see [`classify_ja4`]).
-const BROWSER_JA4_SHAPES: &[(&str, &str, &str, &str)] = &[("t", "13", "d", "h2")];
+/// stack can pad). Each entry below is annotated with the real browser/config that
+/// emits it; all negotiate TLS 1.3 (`tls_version = 13`) and send the SNI
+/// (`sni = d`), differing only in transport (`protocol`) and negotiated `alpn`.
+///
+/// This is a curated heuristic, **not** a real JA4 fingerprint database:
+/// calibrating this whitelist against a real labelled JA4 corpus — adding or
+/// pruning shapes from observed real-browser traffic rather than by hand — is a
+/// deferred follow-up, not done here. A shape absent from this list is not proof
+/// of automation, only an absence of positive browser evidence (see
+/// [`classify_ja4`], and [`StaticIpIntel`] for the same illustrative-placeholder
+/// caveat).
+const BROWSER_JA4_SHAPES: &[(&str, &str, &str, &str)] = &[
+    // Mainstream Chrome/Firefox/Edge/Safari over TCP: TLS 1.3, SNI present, HTTP/2
+    // negotiated. The overwhelmingly common real-browser shape.
+    ("t", "13", "d", "h2"),
+    // The same browsers over QUIC / HTTP-3: QUIC mandates TLS 1.3, still sends the
+    // SNI, and advertises the `h3` ALPN. Chrome and Edge default to HTTP/3 where the
+    // origin offers it, so a legitimate real user on HTTP/3 must not read as
+    // automation (the primary false positive this calibration fixes).
+    ("q", "13", "d", "h3"),
+    // Deliberately NOT whitelisted: `("t", "13", "d", "h1")` (HTTP/1.1 over
+    // TCP+TLS 1.3). `h1` is the dominant automation ALPN, so whitelisting it let a
+    // count-padded `h1` stack pass the shape check — the opposite of the check's
+    // purpose. Legit `h1`-only-over-TLS-1.3 browsers are rare, and the `h3`/QUIC
+    // entry above already covers the real false-positive case, so `h1` stays off
+    // the list. This remains a curated heuristic, not a real JA4 database
+    // (real-JA4-DB calibration deferred — see the doc-comment above).
+];
 
 /// Confidence boost when the UA claim and the observed TLS stack agree — a small
 /// positive nudge toward "real browser" (fuzzy-matching §6, "一致 → 加成").
@@ -377,6 +399,29 @@ fn classify_ja4(ja4: &str) -> ClientStack {
     }
 }
 
+/// Derive a coarse, low-cardinality JA4 **class** key for the cross-session
+/// new-device velocity signal (PLAN-006 HARDEN-002).
+///
+/// The key is the structural `JA4_a` shape — `(protocol, tls_version, sni,
+/// alpn)` — deliberately **without** the cipher/extension counts (an automation
+/// stack can pad those, and a real browser's vary build-to-build). This collapses
+/// every real client of one browser family (e.g. all Chrome-over-HTTP/2) into a
+/// single shared class, which is exactly the intent: a farm rotating a
+/// residential proxy pool but sharing one Chrome JA4 class shows a per-class
+/// new-device rate the per-IP key alone cannot see.
+///
+/// Reuses [`parse_ja4_shape`] (HARDEN-001). Returns `None` when the `JA4_a`
+/// prefix is missing / malformed / too short, so the caller records no
+/// JA4-class event (cold-start neutral).
+pub fn ja4_class(ja4: &str) -> Option<String> {
+    let a = ja4.split('_').next().unwrap_or(ja4);
+    let shape = parse_ja4_shape(a)?;
+    Some(format!(
+        "{}{}{}{}",
+        shape.protocol, shape.tls_version, shape.sni, shape.alpn
+    ))
+}
+
 /// Whether IPv4 `ip` falls in the CIDR block `net/prefix`.
 fn ipv4_in_block(ip: Ipv4Addr, net: Ipv4Addr, prefix: u8) -> bool {
     if prefix == 0 {
@@ -390,7 +435,7 @@ fn ipv4_in_block(ip: Ipv4Addr, net: Ipv4Addr, prefix: u8) -> bool {
 mod tests {
     use super::{
         ClientStack, IpIntel, IpRisk, PassiveSignals, StaticIpIntel, TlsConsistency, classify_ja4,
-        compute,
+        compute, ja4_class,
     };
 
     /// A JA4 whose structural counts read as a real browser (15 ciphers, 16 ext).
@@ -398,9 +443,11 @@ mod tests {
     /// A JA4 whose structural counts read as a minimal automation stack (3/4).
     const AUTOMATION_JA4: &str = "t13d0304h1_aaaaaaaaaaaa_bbbbbbbbbbbb";
     /// A JA4 whose counts are padded past the browser thresholds (15/16) but whose
-    /// shape is non-browser: HTTP/1.1 ALPN (`h1`) where a real browser sends `h2`.
+    /// shape is non-browser: HTTP/1.1 (`alpn = h1`) over TCP+TLS 1.3. `h1` is the
+    /// dominant automation ALPN and is deliberately absent from the browser
+    /// shape whitelist, so this count-padded stack must not pass the shape check.
     /// The count-only heuristic misread this as `Browser`; the shape check catches
-    /// it (RT-002 — closes the count-padding bypass).
+    /// it (closes the count-padding bypass).
     const PADDED_AUTOMATION_JA4: &str = "t13d1516h1_cccccccccccc_dddddddddddd";
     /// A spoofed browser UA (headless automation self-reporting Chrome).
     const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0";
@@ -413,6 +460,11 @@ mod tests {
     /// automation markers (the stealth build ships the honest UA of its engine).
     const CLOAK_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
          (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    /// A QUIC / HTTP-3 browser JA4: protocol `q`, TLS 1.3, SNI present, `h3` ALPN,
+    /// with real-browser cipher/extension counts (15/16). A legitimate Chrome/Edge
+    /// user on HTTP/3 — must classify as a browser, not automation.
+    const QUIC_BROWSER_JA4: &str = "q13d1516h3_8daaf6152771_02713d6af862";
+
     /// A residential (non-datacenter) IPv4 reached over the adversary's residential
     /// proxy. TEST-NET-3, outside every `DATACENTER_V4` block and not private.
     const CLOAK_IP: &str = "203.0.113.55";
@@ -527,12 +579,36 @@ mod tests {
     }
 
     #[test]
+    fn quic_h3_browser_ja4_classifies_as_browser() {
+        // A real Chrome/Edge user over QUIC / HTTP-3: the widened shape whitelist
+        // must accept `(q, 13, d, h3)` so a legitimate HTTP/3 handshake stops
+        // false-reading as automation (the false positive this calibration fixes).
+        assert_eq!(classify_ja4(QUIC_BROWSER_JA4), ClientStack::Browser);
+    }
+
+    #[test]
     fn padded_counts_with_non_browser_shape_reads_as_automation() {
         // An automation stack inflates its cipher/extension lists past the browser
-        // thresholds (15/16) but still negotiates HTTP/1.1 (`h1`) — a shape no real
-        // browser presents. Count-only thresholding misread this as `Browser`; the
-        // full-shape check classifies it as automation.
+        // thresholds (15/16) but presents the `h1` ALPN — the dominant automation
+        // ALPN, kept off the browser shape whitelist. Count-only thresholding
+        // misread this as `Browser`; the full-shape check classifies it as
+        // automation. The count-padding defense stays intact.
         assert_eq!(classify_ja4(PADDED_AUTOMATION_JA4), ClientStack::Automation);
+    }
+
+    #[test]
+    fn ja4_class_is_the_coarse_shape_without_counts() {
+        // The class is the `(protocol, tls_version, sni, alpn)` shape only, so two
+        // JA4s of the same browser family that differ *only* in cipher/extension
+        // counts (and in the hash tail) collapse to ONE shared class — the coarse
+        // bucket the per-class velocity key counts within.
+        assert_eq!(ja4_class(BROWSER_JA4).as_deref(), Some("t13dh2"));
+        assert_eq!(ja4_class(CLOAK_JA4).as_deref(), Some("t13dh2"));
+        assert_eq!(ja4_class(BROWSER_JA4), ja4_class(CLOAK_JA4));
+        // Different transport/ALPN → a different class.
+        assert_eq!(ja4_class(QUIC_BROWSER_JA4).as_deref(), Some("q13dh3"));
+        // A malformed / too-short prefix yields no class (→ no event recorded).
+        assert_eq!(ja4_class("t13d"), None);
     }
 
     #[test]

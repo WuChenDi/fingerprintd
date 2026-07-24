@@ -10,6 +10,7 @@ import { EdgeEngine, initEngineRuntime } from '../src/engine'
 import { SIGNATURE_HEADER, SIGNATURE_TIMESTAMP_HEADER } from '../src/signature'
 import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
 import type { ChallengeResponse, IdentifyResponse } from '../src/types'
+import type { NewDeviceVelocityStore } from '../src/velocity-do'
 
 /** Drive the Hono app with injected deps; state lives in `deps`, so a fresh app
  *  per call is fine (a shim over the pre-Hono `handleRequest(req, deps)`). */
@@ -119,12 +120,13 @@ describe('POST /identify', () => {
     expect(body.decision).toBe('new_device')
     expect(body.confidence).toBeGreaterThanOrEqual(0)
     expect(body.confidence).toBeLessThanOrEqual(1)
-    // Neutral degraded signals when no Bot Management headers are present.
-    // The edge is stateless, so `new_device_velocity` is always the neutral `low`.
+    // Neutral degraded signals when no Bot Management headers are present. With
+    // no velocity binding injected the velocity bands stay the neutral `low`.
     expect(body.signals).toEqual({
       ua_tls_consistent: true,
       ip_risk: 'low',
       new_device_velocity: 'low',
+      new_device_velocity_ja4: 'low',
     })
   })
 
@@ -334,6 +336,7 @@ describe('passive signals (edge JA4/IP fusion)', () => {
       ua_tls_consistent: true,
       ip_risk: 'low',
       new_device_velocity: 'low',
+      new_device_velocity_ja4: 'low',
     })
 
     const consistent = await identifyWith(deps, {
@@ -402,9 +405,131 @@ describe('passive signals (edge JA4/IP fusion)', () => {
       ua_tls_consistent: true,
       ip_risk: 'low',
       new_device_velocity: 'low',
+      new_device_velocity_ja4: 'low',
     })
     // The forged copy neither downgrades confidence nor raises the IP band.
     expect(forged.confidence).toBeCloseTo(baseline.confidence, 12)
+  })
+})
+
+describe('new-device velocity (edge DO band)', () => {
+  const BROWSER_JA4 = 't13d1516h2_8daaf6152771_02713d6af862'
+
+  /** A fake {@link NewDeviceVelocityStore} returning fixed counts and recording
+   *  the keys/args it was called with, so a test can assert the derived band and
+   *  the JA4-class key derivation without a live Durable Object. */
+  class FakeVelocity implements NewDeviceVelocityStore {
+    ipCalls: Array<[string, string, number]> = []
+    ja4Calls: Array<[string, string, number]> = []
+    constructor(
+      private readonly ipCount: number,
+      private readonly ja4Count: number,
+    ) {}
+    newDeviceVelocityIp(ip: string, v: string, w: number): Promise<number> {
+      this.ipCalls.push([ip, v, w])
+      return Promise.resolve(this.ipCount)
+    }
+    newDeviceVelocityJa4(cls: string, v: string, w: number): Promise<number> {
+      this.ja4Calls.push([cls, v, w])
+      return Promise.resolve(this.ja4Count)
+    }
+  }
+
+  /** A store that always throws, to exercise the fail-open path. */
+  class ThrowingVelocity implements NewDeviceVelocityStore {
+    newDeviceVelocityIp(): Promise<number> {
+      return Promise.reject(new Error('DO unavailable'))
+    }
+    newDeviceVelocityJa4(): Promise<number> {
+      return Promise.reject(new Error('DO unavailable'))
+    }
+  }
+
+  const trustedDepsWith = (velocity?: NewDeviceVelocityStore): Deps => ({
+    ...makeDeps({ FP_TRUST_EDGE_HEADERS: '1' }),
+    velocity,
+  })
+
+  /** Full challenge→identify (empty candidate source ⇒ always a new device). */
+  async function identify(
+    deps: Deps,
+    headers: Record<string, string>,
+  ): Promise<IdentifyResponse> {
+    const { nonce } = await challenge(deps)
+    const resp = await handleRequest(
+      new Request('https://edge.test/identify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({
+          nonce,
+          stable_components: probeComponents(),
+        }),
+      }),
+      deps,
+    )
+    expect(resp.status).toBe(200)
+    return (await resp.json()) as IdentifyResponse
+  }
+
+  it('bands a new device from the DO-backed counts on a NewDevice verdict', async () => {
+    // HIGH per-IP count (20) and MEDIUM per-JA4-class count (100).
+    const velocity = new FakeVelocity(20, 100)
+    const deps = trustedDepsWith(velocity)
+    const body = await identify(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    expect(body.is_new_device).toBe(true)
+    expect(body.signals.new_device_velocity).toBe('high')
+    expect(body.signals.new_device_velocity_ja4).toBe('medium')
+    // Keyed on the edge-observed IP and the coarse JA4 shape class (the
+    // `(protocol, tls_version, sni, alpn)` shape, mirroring `ja4_class`), over
+    // the 3600s window, member = the minted visitorId.
+    expect(velocity.ipCalls[0]).toEqual([
+      '198.51.100.7',
+      body.visitorId,
+      3600 * 1000,
+    ])
+    expect(velocity.ja4Calls[0]).toEqual([
+      't13dh2',
+      body.visitorId,
+      3600 * 1000,
+    ])
+  })
+
+  it('fails open to low when no velocity binding is present', async () => {
+    // Trusted headers + a new device, but the binding is unbound (undefined).
+    const body = await identify(trustedDepsWith(undefined), {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    expect(body.signals.new_device_velocity).toBe('low')
+    expect(body.signals.new_device_velocity_ja4).toBe('low')
+  })
+
+  it('fails open to low when the DO throws', async () => {
+    const body = await identify(trustedDepsWith(new ThrowingVelocity()), {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    // A DO error must never block or error the request — it degrades to neutral.
+    expect(body.signals.new_device_velocity).toBe('low')
+    expect(body.signals.new_device_velocity_ja4).toBe('low')
+  })
+
+  it('stays neutral on an untrusted edge (velocity never keyed on forged headers)', async () => {
+    // trustEdgeHeaders OFF: even with a velocity store, the client-supplied
+    // IP/JA4 are untrusted, so no velocity is recorded (mirrors native's None).
+    const velocity = new FakeVelocity(20, 100)
+    const deps: Deps = { ...makeDeps(), velocity }
+    const body = await identify(deps, {
+      'cf-bot-management-ja4': BROWSER_JA4,
+      'cf-connecting-ip': '198.51.100.7',
+    })
+    expect(body.signals.new_device_velocity).toBe('low')
+    expect(body.signals.new_device_velocity_ja4).toBe('low')
+    expect(velocity.ipCalls).toHaveLength(0)
+    expect(velocity.ja4Calls).toHaveLength(0)
   })
 })
 

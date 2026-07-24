@@ -33,6 +33,23 @@ pub const MEDIUM: u64 = 5;
 /// fresh-seed-per-launch farm's footprint and earns the confidence downgrade.
 pub const HIGH: u64 = 20;
 
+/// Per-JA4-**class** new-device count (within [`WINDOW`]) at or above which the
+/// class key is [`VelocityBand::Medium`].
+///
+/// TUNING PLACEHOLDER — and deliberately *orders of magnitude* above the per-IP
+/// [`MEDIUM`]: a JA4 class is the coarse `(protocol, tls_version, sni, alpn)`
+/// shape shared by **every** real client of that browser family (JA4 is
+/// low-entropy), so a legitimate per-class new-device count is naturally far
+/// higher than a per-IP one. This value MUST be calibrated against real
+/// per-class traffic volume before the band drives any action; using the per-IP
+/// thresholds here would flag all normal Chrome traffic.
+pub const JA4_MEDIUM: u64 = 100;
+/// Per-JA4-**class** new-device count (within [`WINDOW`]) at or above which the
+/// class key is [`VelocityBand::High`] — the proxy-pool farm's cross-IP
+/// footprint. TUNING PLACEHOLDER, far above the per-IP [`HIGH`] (see
+/// [`JA4_MEDIUM`] for why).
+pub const JA4_HIGH: u64 = 400;
+
 /// Storage contract for the per-key new-device event material behind the
 /// cross-session velocity signal.
 ///
@@ -165,16 +182,32 @@ impl VelocityBand {
         }
     }
 
-    /// Classify a new-device `count` (within [`WINDOW`]) into its band using the
-    /// documented [`MEDIUM`] / [`HIGH`] thresholds.
-    pub fn classify(count: u64) -> VelocityBand {
-        if count >= HIGH {
+    /// Classify a new-device `count` into a band against explicit
+    /// `medium` / `high` thresholds. Shared by the per-IP key ([`classify`]) and
+    /// the per-JA4-class key ([`classify_ja4`]), whose thresholds differ by
+    /// orders of magnitude.
+    pub fn classify_with(count: u64, medium: u64, high: u64) -> VelocityBand {
+        if count >= high {
             VelocityBand::High
-        } else if count >= MEDIUM {
+        } else if count >= medium {
             VelocityBand::Medium
         } else {
             VelocityBand::Low
         }
+    }
+
+    /// Classify a per-IP new-device `count` (within [`WINDOW`]) into its band
+    /// using the documented [`MEDIUM`] / [`HIGH`] thresholds.
+    pub fn classify(count: u64) -> VelocityBand {
+        Self::classify_with(count, MEDIUM, HIGH)
+    }
+
+    /// Classify a per-JA4-**class** new-device `count` (within [`WINDOW`]) using
+    /// the far-higher [`JA4_MEDIUM`] / [`JA4_HIGH`] thresholds — a JA4 class is
+    /// shared by every real client of a browser family, so per-class counts are
+    /// legitimately far higher than per-IP ones.
+    pub fn classify_ja4(count: u64) -> VelocityBand {
+        Self::classify_with(count, JA4_MEDIUM, JA4_HIGH)
     }
 }
 
@@ -239,5 +272,29 @@ mod tests {
         assert_eq!(VelocityBand::Low.as_str(), "low");
         assert_eq!(VelocityBand::Medium.as_str(), "medium");
         assert_eq!(VelocityBand::High.as_str(), "high");
+    }
+
+    #[test]
+    fn classify_ja4_uses_the_far_higher_thresholds() {
+        use super::{JA4_HIGH, JA4_MEDIUM};
+
+        // The JA4-class band rises with per-class new-device count, crossing the
+        // documented placeholder thresholds.
+        assert_eq!(VelocityBand::classify_ja4(0), VelocityBand::Low);
+        assert_eq!(
+            VelocityBand::classify_ja4(JA4_MEDIUM - 1),
+            VelocityBand::Low
+        );
+        assert_eq!(VelocityBand::classify_ja4(JA4_MEDIUM), VelocityBand::Medium);
+        assert_eq!(
+            VelocityBand::classify_ja4(JA4_HIGH - 1),
+            VelocityBand::Medium
+        );
+        assert_eq!(VelocityBand::classify_ja4(JA4_HIGH), VelocityBand::High);
+
+        // The JA4 thresholds are far above the per-IP ones: a count that is
+        // already High for an IP is still the neutral Low band for a JA4 class.
+        const { assert!(JA4_MEDIUM > HIGH) };
+        assert_eq!(VelocityBand::classify_ja4(HIGH), VelocityBand::Low);
     }
 }
