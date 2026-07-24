@@ -160,15 +160,22 @@ cargo deny check
 
 The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
 
-> **Vendored WASM.** `apps/edge/wasm` and `packages/client/wasm` are build outputs of [`crates/fp-wasm`](crates/fp-wasm) and are **not committed**. On a fresh clone (or after `bun run clean`), build them once — the SDK and the apps import them:
+> **Vendored WASM.** `apps/edge/wasm` and `packages/client/wasm` are build outputs of [`crates/fp-wasm`](crates/fp-wasm) and are **not committed** — they're rebuilt from source on demand (only on a fresh clone or after `bun run clean`; a normal install never recompiles).
 >
-> ```bash
-> bun install          # succeeds; the SDK prebuild is skipped until the WASM exists
-> bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
-> bun run build        # now builds the SDK + apps
-> ```
+> - With a **Rust toolchain + `wasm-pack`** installed, a plain `bun install` builds them automatically:
 >
-> Requires a Rust toolchain and `wasm-pack` (`cargo install wasm-pack`).
+>   ```bash
+>   bun install   # builds the WASM (if missing) + the SDK
+>   ```
+>
+> - **Without** the Rust toolchain, install still succeeds but skips the SDK prebuild — build the WASM once the toolchain is available:
+>
+>   ```bash
+>   bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+>   bun run build        # then builds the SDK + apps
+>   ```
+>
+> Install `wasm-pack` with `cargo install wasm-pack`.
 
 Per-component tooling:
 

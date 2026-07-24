@@ -160,15 +160,22 @@ cargo deny check
 
 deny-warnings 策略写在 `[workspace.lints]` 里;CI 跑同样的命令,外加 SDK 与 Worker 的测试(`.github/workflows/`)。Rust 与 TypeScript 两套栈由一份共享的 **parity fixture** 在两侧同时验证,保持行为一致(见 [`apps/edge/README.md`](apps/edge/README.md))。
 
-> **vendored WASM。** `apps/edge/wasm` 与 `packages/client/wasm` 是 [`crates/fp-wasm`](crates/fp-wasm) 的构建产物,**不提交进仓库**。全新 clone(或 `bun run clean`)之后构建一次即可 —— SDK 与各 app 都会导入它们:
+> **vendored WASM。** `apps/edge/wasm` 与 `packages/client/wasm` 是 [`crates/fp-wasm`](crates/fp-wasm) 的构建产物,**不提交进仓库** —— 按需从源码重建(仅全新 clone 或 `bun run clean` 之后;正常安装不会重新编译)。
 >
-> ```bash
-> bun install          # 直接成功;WASM 就绪前会跳过 SDK 预构建
-> bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
-> bun run build        # 此时才构建 SDK + apps
-> ```
+> - 装了 **Rust 工具链 + `wasm-pack`** 时,直接 `bun install` 会自动构建:
 >
-> 需要 Rust 工具链和 `wasm-pack`(`cargo install wasm-pack`)。
+>   ```bash
+>   bun install   # 缺失时构建 WASM + SDK
+>   ```
+>
+> - **没有** Rust 工具链时,install 仍会成功、但跳过 SDK 预构建 —— 工具链就绪后手动构建一次:
+>
+>   ```bash
+>   bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+>   bun run build        # 之后构建 SDK + apps
+>   ```
+>
+> 用 `cargo install wasm-pack` 安装 wasm-pack。
 
 各组件工具链:
 
