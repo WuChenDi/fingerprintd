@@ -107,6 +107,15 @@ const { identity } = await run({
 - **Playground** —— [`apps/web`](apps/web/README.md) 在浏览器里跑通整个流程,可视化客户端**发送**了什么、服务端**判定**了什么。
 - **签到风控判定** —— edge Worker 还提供 `POST /checkin/assess`,一个 config 门控层:补上 fingerprintd 刻意不持有的账号/设备/IP/时序聚合,把一次判定转成用于每日签到反刷的 allow / challenge / deny 决策;由 [playground](apps/web/README.md) 演示。
 
+CI 通过手动的 `deploy-edge` / `deploy-web` workflow 部署。要**从本机**部署(从源码重建 WASM → 构建 → 推送到 Cloudflare),用 `bun run deploy:cf [edge|web|all]`:
+
+```bash
+DRY_RUN=1 bun run deploy:cf edge          # 构建 + wrangler dry-run,无需账号
+FP_PROBE_KEY=<key> bun run deploy:cf all   # 真正部署(需 wrangler login 或 CLOUDFLARE_API_TOKEN)
+```
+
+`FP_PROBE_KEY` 会烘焙进 WASM;若要启用探针校验,它必须等于 Worker 运行时的 `FP_PROBE_KEY` secret。运行时 secret 单独用 `wrangler secret put` 管理。
+
 ## 配置
 
 原生服务按优先级从低到高配置:内置默认 → `fingerprintd.toml` → `FINGERPRINTD_` 前缀的环境变量。

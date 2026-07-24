@@ -107,6 +107,15 @@ One compute core ([`crates/fp-core`](crates/fp-core), compiled to WASM via [`cra
 - **Playground** — [`apps/web`](apps/web/README.md) drives the whole flow in a browser and visualizes what the client sends vs. what the server judges.
 - **Check-in risk decision** — the edge Worker also serves `POST /checkin/assess`, a config-gated layer that adds the account/device/IP/time aggregation fingerprintd deliberately doesn't hold and turns a verdict into an allow / challenge / deny decision for daily check-in anti-farming; the [playground](apps/web/README.md) demos it.
 
+CI deploys via the manual `deploy-edge` / `deploy-web` workflows. To deploy **from your machine** (rebuild WASM from source → build → push to Cloudflare), use `bun run deploy:cf [edge|web|all]`:
+
+```bash
+DRY_RUN=1 bun run deploy:cf edge          # build + wrangler dry-run, no account needed
+FP_PROBE_KEY=<key> bun run deploy:cf all   # real deploy (wrangler login or CLOUDFLARE_API_TOKEN)
+```
+
+`FP_PROBE_KEY` is baked into the WASM; for a probe-enforced deploy it must equal the Worker's runtime `FP_PROBE_KEY` secret. Runtime secrets are managed separately with `wrangler secret put`.
+
 ## Configuration
 
 The native server is configured lowest → highest priority: built-in defaults → `fingerprintd.toml` → `FINGERPRINTD_`-prefixed environment variables.
