@@ -21,6 +21,7 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import * as z from 'zod'
+import { asnIpRisk } from './asn-ip-risk'
 import type { CheckinStore } from './checkin-state'
 import type { AggregateResult } from './checkin-store-d1'
 import type { EdgeConfig } from './config'
@@ -337,7 +338,21 @@ function edgeSignals(
   }
   const ja4 = (raw.headers.get(JA4_HEADER) ?? cfJa4(raw))?.trim() || undefined
   const clientIp = raw.headers.get(CF_CONNECTING_IP)?.trim() || undefined
-  return deps.engine.passiveSignals(ja4, clientIp, claimedUa(components))
+  const verdict = deps.engine.passiveSignals(
+    ja4,
+    clientIp,
+    claimedUa(components),
+  )
+  // Fuse the Cloudflare ASN reputation band: it can only RAISE the WASM band to
+  // `high` (a curated hosting/datacenter ASN whose IP is outside fp-core's CIDR
+  // table), never lower a `medium`/`high` band. `max(wasmBand, asnBand)` with
+  // `high` the top — read ONLY here on the trusted path, so an untrusted origin
+  // never touches `cf`.
+  const { asn, asOrganization } = cfAsn(raw)
+  if (asnIpRisk(asn, asOrganization) === 'high') {
+    return { ...verdict, ip_risk: 'high' }
+  }
+  return verdict
 }
 
 /** The Cloudflare-computed JA4 fallback from `request.cf.botManagement` when the
@@ -346,6 +361,15 @@ function edgeSignals(
 function cfJa4(raw: Request): string | undefined {
   const cf = (raw as { cf?: { botManagement?: { ja4?: string } } }).cf
   return cf?.botManagement?.ja4
+}
+
+/** The Cloudflare-computed ASN enrichment from `request.cf` — the AS number and
+ *  AS organization of the connecting IP's network. Not in the base workers-types,
+ *  and absent locally (miniflare / tests) or off a non-CF edge, so read it
+ *  defensively and default to `{}`. */
+function cfAsn(raw: Request): { asn?: number; asOrganization?: string } {
+  const cf = (raw as { cf?: { asn?: number; asOrganization?: string } }).cf
+  return cf ? { asn: cf.asn, asOrganization: cf.asOrganization } : {}
 }
 
 /** The client-reported UA under suspicion, taken from the body's stable

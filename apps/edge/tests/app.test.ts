@@ -412,6 +412,99 @@ describe('passive signals (edge JA4/IP fusion)', () => {
   })
 })
 
+describe('ASN IP-risk band (edge cf enrichment)', () => {
+  const BROWSER_JA4 = 't13d1516h2_8daaf6152771_02713d6af862'
+
+  /** Build an /identify request with an optional Cloudflare `cf` enrichment
+   *  object attached (the field the Worker runtime injects; absent in the base
+   *  Request), so `cfAsn` has an ASN to read on the trusted path. */
+  const postIdentifyCf = (
+    body: unknown,
+    headers: Record<string, string>,
+    cf?: Record<string, unknown>,
+  ) => {
+    const req = new Request('https://edge.test/identify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+    if (cf) (req as unknown as { cf: unknown }).cf = cf
+    return req
+  }
+
+  async function identifyCf(
+    deps: Deps,
+    headers: Record<string, string>,
+    cf?: Record<string, unknown>,
+  ): Promise<IdentifyResponse> {
+    const { nonce } = await challenge(deps)
+    const resp = await handleRequest(
+      postIdentifyCf(
+        { nonce, stable_components: probeComponents() },
+        headers,
+        cf,
+      ),
+      deps,
+    )
+    expect(resp.status).toBe(200)
+    return (await resp.json()) as IdentifyResponse
+  }
+
+  const trustedDeps = () => makeDeps({ FP_TRUST_EDGE_HEADERS: '1' })
+
+  it('raises ip_risk to high for a hosting ASN whose IP is outside the CIDR table', async () => {
+    const deps = trustedDeps()
+    // Residential-looking IP (WASM band `low`, outside fp-core's CIDR table) but
+    // a curated hosting ASN (AWS 16509) → the ASN reputation raises the surfaced
+    // band to `high` (max(wasmBand, asnBand)).
+    const body = await identifyCf(
+      deps,
+      {
+        'cf-bot-management-ja4': BROWSER_JA4,
+        'cf-connecting-ip': '198.51.100.7',
+      },
+      { asn: 16509, asOrganization: 'AMAZON-02' },
+    )
+    expect(body.signals.ip_risk).toBe('high')
+  })
+
+  it('keeps the WASM band for a residential ASN', async () => {
+    const deps = trustedDeps()
+    // A non-hosting residential ASN (Comcast 7922) never bumps the band — the
+    // ASN can only raise, so the WASM `low` is preserved.
+    const body = await identifyCf(
+      deps,
+      {
+        'cf-bot-management-ja4': BROWSER_JA4,
+        'cf-connecting-ip': '198.51.100.7',
+      },
+      { asn: 7922, asOrganization: 'COMCAST-7922' },
+    )
+    expect(body.signals.ip_risk).toBe('low')
+  })
+
+  it('never reads cf on an untrusted edge (hosting ASN ignored)', async () => {
+    // trustEdgeHeaders defaults OFF: even a hosting cf.asn + datacenter IP must
+    // be ignored — the untrusted path returns the neutral degraded verdict and
+    // never touches `cf`.
+    const deps = makeDeps()
+    const body = await identifyCf(
+      deps,
+      {
+        'cf-bot-management-ja4': BROWSER_JA4,
+        'cf-connecting-ip': '34.120.5.6',
+      },
+      { asn: 16509, asOrganization: 'AMAZON-02' },
+    )
+    expect(body.signals).toEqual({
+      ua_tls_consistent: true,
+      ip_risk: 'low',
+      new_device_velocity: 'low',
+      new_device_velocity_ja4: 'low',
+    })
+  })
+})
+
 describe('new-device velocity (edge DO band)', () => {
   const BROWSER_JA4 = 't13d1516h2_8daaf6152771_02713d6af862'
 
