@@ -1,6 +1,6 @@
 import { env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { IdentifyResponse } from '../src/types'
+import type { IdentifyResponse } from '../src/lib/types'
 import parityFixture from './fixtures/parity.json'
 
 // Edge half of the cross-stack parity proof.

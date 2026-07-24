@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { VelocityStore } from '../src/velocity-do'
+import { VelocityStore } from '../src/lib/do/velocity-do'
 
 // The hot velocity counter against the real runtime: the VelocityDurableObject
 // maintains a rolling distinct-member window per entity, exercised through

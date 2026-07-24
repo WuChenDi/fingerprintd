@@ -15,11 +15,11 @@
  */
 
 import { eq, inArray, lt, sql } from 'drizzle-orm'
-import type { Db } from './db/client'
-import { getDb } from './db/client'
-import { blockingIndex, templates } from './db/schema'
-import type { Candidate, CandidateSource } from './state'
-import type { ScoreOutcome } from './types'
+import type { Db } from '../../db/client'
+import { getDb } from '../../db/client'
+import { blockingIndex, templates } from '../../db/schema'
+import type { Candidate, CandidateSource } from '../../lib/state'
+import type { ScoreOutcome } from '../../lib/types'
 
 /**
  * Per-recall candidate cap, mirroring `fp_core::fuzzy::blocking::DEFAULT_MAX_BLOCK`.

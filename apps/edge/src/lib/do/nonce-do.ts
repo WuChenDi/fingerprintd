@@ -15,7 +15,7 @@
  * alarm set to the expiry burns an un-consumed nonce so storage does not leak.
  */
 
-import type { NonceOutcome, NonceStore } from './state'
+import type { NonceOutcome, NonceStore } from '../state'
 
 /** The single storage key each per-nonce instance holds. */
 const RECORD_KEY = 'nonce'

@@ -16,19 +16,22 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Deps } from '../src/app'
 import { createApp } from '../src/app'
-import type { CheckinStore } from '../src/checkin-state'
-import { zeroAggregateResult } from '../src/checkin-state'
-import type { AggregateResult } from '../src/checkin-store-d1'
 import { resolveConfig } from '../src/config'
-import { EdgeEngine, initEngineRuntime } from '../src/engine'
-import type { ReasonCode, ThresholdProfile } from '../src/risk-config'
-import { defaultProfiles } from '../src/risk-config'
-import { EmptyCandidateSource, InMemoryNonceStore } from '../src/state'
+import type { ReasonCode, ThresholdProfile } from '../src/config/risk-config'
+import { defaultProfiles } from '../src/config/risk-config'
+import { EmptyCandidateSource, InMemoryNonceStore } from '../src/lib/state'
 import type {
   AssessRequest,
   AssessResponse,
   IdentifyResponse,
-} from '../src/types'
+} from '../src/lib/types'
+import type { CheckinStore } from '../src/modules/checkin/checkin-state'
+import { zeroAggregateResult } from '../src/modules/checkin/checkin-state'
+import type { AggregateResult } from '../src/modules/checkin/checkin-store-d1'
+import {
+  EdgeEngine,
+  initEngineRuntime,
+} from '../src/modules/fingerprint/engine'
 
 // The assess path lives in the merged edge app, so a test builds the FULL edge
 // `Deps` with an injected check-in store. The WASM engine loads once from the

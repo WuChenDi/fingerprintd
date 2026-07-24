@@ -7,9 +7,17 @@
  * the endpoint stay separately testable.
  */
 
-import type { Aggregates, ReasonCode, ThresholdProfile } from './risk-config'
-import { defaultProfiles } from './risk-config'
-import type { AssessReason, AssessRequest, AssessResponse } from './types'
+import type {
+  Aggregates,
+  ReasonCode,
+  ThresholdProfile,
+} from '../../config/risk-config'
+import { defaultProfiles } from '../../config/risk-config'
+import type {
+  AssessReason,
+  AssessRequest,
+  AssessResponse,
+} from '../../lib/types'
 
 /** Human-readable `detail` for each fired reason code. */
 const REASON_DETAIL: Record<ReasonCode, string> = {

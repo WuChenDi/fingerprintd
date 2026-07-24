@@ -1,11 +1,11 @@
 import { env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DurableNonceStore } from '../src/lib/do/nonce-do'
+import type { ScoreOutcome } from '../src/lib/types'
 import {
   D1FingerprintStore,
   DEFAULT_MAX_BLOCK,
-} from '../src/fingerprint-store-d1'
-import { DurableNonceStore } from '../src/nonce-do'
-import type { ScoreOutcome } from '../src/types'
+} from '../src/modules/fingerprint/fingerprint-store-d1'
 
 // The state layer against the real runtime: the nonce Durable Object burns
 // atomically, and the D1 store recalls + drifts templates. These run in

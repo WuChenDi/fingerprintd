@@ -17,11 +17,9 @@
 export interface Env {
   /** Nonce Durable Object namespace. Unbound ⇒ the in-isolate stub. */
   NONCE?: DurableObjectNamespace
-  /** D1 fingerprint database. Unbound ⇒ the empty candidate stub. */
+  /** D1 database: fingerprint library + blocking index + check-in event log.
+   *  Unbound ⇒ the empty candidate + check-in store stubs. */
   DB?: D1Database
-  /** Check-in event D1 database (SEPARATE from `DB`). Unbound ⇒ the empty
-   *  check-in store stub (all-zero aggregates). */
-  CHECKIN_DB?: D1Database
   /** Velocity Durable Object namespace for hot check-in fan-out counters. */
   VELOCITY?: DurableObjectNamespace
   /** Check-in retention window in seconds: events older than this are purged by

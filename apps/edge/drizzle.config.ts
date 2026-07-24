@@ -1,6 +1,8 @@
 import { defineConfig } from 'drizzle-kit'
 
-// Schema -> D1 migrations (out: ./src/database, drizzle-kit house layout).
+// Schema -> D1 migrations (out: ./drizzle). The `./src/db/schema.ts` barrel
+// aggregates both domains (fingerprint state + the check-in event log), so one
+// generated migration set covers the whole single D1 database.
 //
 // `drizzle-kit generate` needs only dialect + schema + out and runs locally
 // with no account — that is what produces the committed migration SQL the test
@@ -11,5 +13,5 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   schema: './src/db/schema.ts',
-  out: './src/database',
+  out: './drizzle',
 })

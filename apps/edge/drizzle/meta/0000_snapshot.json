@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e27353c4-2ad0-411c-bae2-2651e18d90d8",
+  "id": "ba1028c3-7006-4d65-840e-20f24c340f69",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "blocking_index": {
@@ -103,6 +103,60 @@
         }
       },
       "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "checkin_events": {
+      "name": "checkin_events",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "visitor_id": {
+          "name": "visitor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ts": {
+          "name": "ts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_checkin_events_visitor_ts": {
+          "name": "idx_checkin_events_visitor_ts",
+          "columns": ["visitor_id", "ts"],
+          "isUnique": false
+        },
+        "idx_checkin_events_account_ts": {
+          "name": "idx_checkin_events_account_ts",
+          "columns": ["account_id", "ts"],
+          "isUnique": false
+        },
+        "idx_checkin_events_ip_ts": {
+          "name": "idx_checkin_events_ip_ts",
+          "columns": ["ip", "ts"],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

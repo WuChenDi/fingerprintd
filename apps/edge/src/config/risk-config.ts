@@ -5,7 +5,7 @@
  * the scoring path. Defaults live in {@link defaultProfiles}.
  */
 
-import type { AssessRequest } from './types'
+import type { AssessRequest } from '../lib/types'
 
 /**
  * Aggregate signals the rule engine consumes — the account/device/IP/time

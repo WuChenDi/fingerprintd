@@ -6,7 +6,7 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 // all farming signals are windowed `COUNT(DISTINCT ...)` aggregates over it
 // (see `src/checkin-store-d1.ts`). Hot atomic velocity counters that would
 // otherwise scan this table per request live in a Durable Object instead
-// (`src/velocity-do.ts`).
+// (`src/lib/do/velocity-do.ts`).
 
 /**
  * Append-only check-in event: `(accountId, visitorId, ip)` observed at `ts`

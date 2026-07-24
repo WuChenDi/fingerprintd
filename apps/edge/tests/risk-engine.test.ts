@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { Aggregates, ThresholdProfile } from '../src/risk-config'
-import { defaultProfiles } from '../src/risk-config'
-import { assess } from '../src/risk-engine'
-import type { AssessRequest, Signals } from '../src/types'
+import type { Aggregates, ThresholdProfile } from '../src/config/risk-config'
+import { defaultProfiles } from '../src/config/risk-config'
+import type { AssessRequest, Signals } from '../src/lib/types'
+import { assess } from '../src/modules/checkin/risk-engine'
 
 const profile = defaultProfiles.daily_checkin
 

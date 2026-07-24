@@ -17,19 +17,21 @@
 import wasmModule from '../wasm/fp_wasm_bg.wasm'
 import type { Deps } from './app'
 import { createApp } from './app'
-import { EmptyCheckinStore } from './checkin-state'
-import { D1CheckinStore } from './checkin-store-d1'
 import type { Env } from './config'
 import { resolveConfig } from './config'
-import { EdgeEngine, initEngineRuntime } from './engine'
-import { D1FingerprintStore } from './fingerprint-store-d1'
-import { DurableNonceStore } from './nonce-do'
-import type { CandidateSource, NonceStore } from './state'
-import { EmptyCandidateSource, InMemoryNonceStore } from './state'
-import { VelocityStore } from './velocity-do'
+import { DurableNonceStore } from './lib/do/nonce-do'
+import { VelocityStore } from './lib/do/velocity-do'
+import type { CandidateSource, NonceStore } from './lib/state'
+import { EmptyCandidateSource, InMemoryNonceStore } from './lib/state'
+import { D1CheckinStore, EmptyCheckinStore } from './modules/checkin'
+import {
+  D1FingerprintStore,
+  EdgeEngine,
+  initEngineRuntime,
+} from './modules/fingerprint'
 
-export { NonceDurableObject } from './nonce-do'
-export { VelocityDurableObject } from './velocity-do'
+export { NonceDurableObject } from './lib/do/nonce-do'
+export { VelocityDurableObject } from './lib/do/velocity-do'
 
 /** Per-isolate singletons, lazily built on the first request. */
 let deps: Deps | undefined
@@ -45,9 +47,7 @@ function buildDeps(env: Env): Deps {
     nonces: nonceStore(env, config.nonceTtlSecs),
     candidates: candidateSource(env),
     config,
-    checkin: env.CHECKIN_DB
-      ? new D1CheckinStore(env.CHECKIN_DB)
-      : new EmptyCheckinStore(),
+    checkin: env.DB ? new D1CheckinStore(env.DB) : new EmptyCheckinStore(),
     // The VELOCITY Durable Object backs the cross-session new-device velocity
     // signal; unbound ⇒ omitted, and the /identify path degrades to the neutral
     // `low` band (fail-open), like the pre-DO stateless edge.
@@ -80,7 +80,7 @@ export default {
    *   - fingerprint templates: when `FP_RETENTION_SECS` > 0 and `DB` is bound,
    *     delete every template last seen beyond the window plus its
    *     blocking-index rows;
-   *   - check-in events: when `CHECKIN_RETENTION_SECS` > 0 and `CHECKIN_DB` is
+   *   - check-in events: when `CHECKIN_RETENTION_SECS` > 0 and `DB` is
    *     bound, delete every check-in event older than the window.
    * Either disabled (0) ⇒ that purge is a no-op. The purge queries live on the
    * respective stores so they are unit-testable without the cron.
@@ -100,8 +100,8 @@ export default {
         console.log(`retention purge: removed ${purged} stale template(s)`)
       }
     }
-    if (config.checkinRetentionMs > 0 && env.CHECKIN_DB) {
-      const purged = await new D1CheckinStore(env.CHECKIN_DB).purgeOlderThan(
+    if (config.checkinRetentionMs > 0 && env.DB) {
+      const purged = await new D1CheckinStore(env.DB).purgeOlderThan(
         Date.now() - config.checkinRetentionMs,
       )
       if (purged > 0) {
