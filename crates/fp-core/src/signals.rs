@@ -45,6 +45,16 @@ const BROWSER_MIN_CIPHERS: u32 = 10;
 /// automation stacks carry far fewer.
 const BROWSER_MIN_EXTENSIONS: u32 = 10;
 
+/// Curated set of `JA4_a` structural shapes that real browsers share, each a
+/// `(protocol, tls_version, sni, alpn)` tuple — the coarse structural signature
+/// deliberately *without* the exact cipher/extension counts (which an automation
+/// stack can pad). Modern Chrome/Firefox/Edge/Safari all negotiate TLS 1.3
+/// (`tls_version = 13`), send the SNI (`sni = d`), and advertise HTTP/2
+/// (`alpn = h2`) over TCP (`protocol = t`). This is a coarse curated placeholder
+/// in the spirit of [`StaticIpIntel`], **not** a real JA4 fingerprint database
+/// (future TODO — real JA4 fingerprint database, see [`classify_ja4`]).
+const BROWSER_JA4_SHAPES: &[(&str, &str, &str, &str)] = &[("t", "13", "d", "h2")];
+
 /// Confidence boost when the UA claim and the observed TLS stack agree — a small
 /// positive nudge toward "real browser" (fuzzy-matching §6, "一致 → 加成").
 const CONSISTENT_BOOST: f64 = 0.05;
@@ -297,27 +307,73 @@ fn classify_ua(ua: &str) -> ClientStack {
     }
 }
 
+/// The parsed fields of a `JA4_a` prefix at their fixed offsets.
+struct Ja4Shape<'a> {
+    protocol: &'a str,
+    tls_version: &'a str,
+    sni: &'a str,
+    ciphers: u32,
+    extensions: u32,
+    alpn: &'a str,
+}
+
+/// Parse a `JA4_a` prefix into its [`Ja4Shape`] fields, or `None` if any field is
+/// missing / too short / not a valid count. Offsets follow the JA4 layout:
+/// `protocol(1) tls_version(2) sni(1) cipher_count(2) extension_count(2) alpn(2)`.
+fn parse_ja4_shape(a: &str) -> Option<Ja4Shape<'_>> {
+    Some(Ja4Shape {
+        protocol: a.get(0..1)?,
+        tls_version: a.get(1..3)?,
+        sni: a.get(3..4)?,
+        ciphers: a.get(4..6)?.parse().ok()?,
+        extensions: a.get(6..8)?.parse().ok()?,
+        alpn: a.get(8..10)?,
+    })
+}
+
 /// Classify a JA4 fingerprint into a coarse [`ClientStack`] from its structure.
 ///
 /// The `JA4_a` prefix (before the first `_`) encodes, at fixed offsets:
 /// `protocol(1) tls_version(2) sni(1) cipher_count(2) extension_count(2)
-/// alpn(2)`. A real browser advertises many ciphers and extensions; a minimal
-/// automation stack advertises few. We read the two 2-digit counts and threshold
-/// them ([`BROWSER_MIN_CIPHERS`] / [`BROWSER_MIN_EXTENSIONS`]).
+/// alpn(2)`. We parse the *full* prefix (via [`parse_ja4_shape`]) and combine two
+/// checks rather than thresholding the counts alone:
+///
+/// - **counts** — a real browser advertises many ciphers and extensions; a
+///   minimal automation stack advertises few ([`BROWSER_MIN_CIPHERS`] /
+///   [`BROWSER_MIN_EXTENSIONS`]). Counts below the bar read as automation.
+/// - **shape** — the structural `(protocol, tls_version, sni, alpn)` tuple must
+///   match a known real-browser signature ([`BROWSER_JA4_SHAPES`]). This closes
+///   the count-padding bypass: an automation stack that merely inflates its
+///   cipher/extension lists past the thresholds but keeps a non-browser shape
+///   (wrong ALPN / TLS-version pattern) reads as [`ClientStack::Automation`],
+///   not `Browser`.
 ///
 /// This is a coarse structural heuristic, **not** a JA4→client fingerprint
 /// database; a malformed or too-short prefix reads as [`ClientStack::Unknown`]
 /// (→ degrade). (future TODO — real JA4 fingerprint database.)
 fn classify_ja4(ja4: &str) -> ClientStack {
     let a = ja4.split('_').next().unwrap_or(ja4);
-    let ciphers = a.get(4..6).and_then(|s| s.parse::<u32>().ok());
-    let extensions = a.get(6..8).and_then(|s| s.parse::<u32>().ok());
-    match (ciphers, extensions) {
-        (Some(c), Some(e)) if c >= BROWSER_MIN_CIPHERS && e >= BROWSER_MIN_EXTENSIONS => {
-            ClientStack::Browser
-        }
-        (Some(_), Some(_)) => ClientStack::Automation,
-        _ => ClientStack::Unknown,
+    let Some(shape) = parse_ja4_shape(a) else {
+        return ClientStack::Unknown;
+    };
+    // Counts below the browser bar are a minimal automation stack (unchanged).
+    if shape.ciphers < BROWSER_MIN_CIPHERS || shape.extensions < BROWSER_MIN_EXTENSIONS {
+        return ClientStack::Automation;
+    }
+    // Counts clear the bar; only a known real-browser shape confirms Browser.
+    // Padded counts on a non-browser shape are the forgery case we now catch.
+    let is_browser_shape = BROWSER_JA4_SHAPES
+        .iter()
+        .any(|&(protocol, tls, sni, alpn)| {
+            shape.protocol == protocol
+                && shape.tls_version == tls
+                && shape.sni == sni
+                && shape.alpn == alpn
+        });
+    if is_browser_shape {
+        ClientStack::Browser
+    } else {
+        ClientStack::Automation
     }
 }
 
@@ -341,8 +397,25 @@ mod tests {
     const BROWSER_JA4: &str = "t13d1516h2_8daaf6152771_02713d6af862";
     /// A JA4 whose structural counts read as a minimal automation stack (3/4).
     const AUTOMATION_JA4: &str = "t13d0304h1_aaaaaaaaaaaa_bbbbbbbbbbbb";
+    /// A JA4 whose counts are padded past the browser thresholds (15/16) but whose
+    /// shape is non-browser: HTTP/1.1 ALPN (`h1`) where a real browser sends `h2`.
+    /// The count-only heuristic misread this as `Browser`; the shape check catches
+    /// it (RT-002 — closes the count-padding bypass).
+    const PADDED_AUTOMATION_JA4: &str = "t13d1516h1_cccccccccccc_dddddddddddd";
     /// A spoofed browser UA (headless automation self-reporting Chrome).
     const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0";
+
+    /// `CloakBrowser` adversary profile — a real stealth Chromium, not an automation
+    /// stack. Its TLS handshake is a genuine Chrome handshake, so its JA4 counts
+    /// read as a browser (15 ciphers / 16 extensions, ≥ the browser thresholds).
+    const CLOAK_JA4: &str = "t13d1516h2_8daaf6152771_e5627efa2ab1";
+    /// A genuine, current Chrome desktop UA — a real browser string with no
+    /// automation markers (the stealth build ships the honest UA of its engine).
+    const CLOAK_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+         (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    /// A residential (non-datacenter) IPv4 reached over the adversary's residential
+    /// proxy. TEST-NET-3, outside every `DATACENTER_V4` block and not private.
+    const CLOAK_IP: &str = "203.0.113.55";
 
     #[test]
     fn static_intel_flags_datacenter_high_and_residential_low() {
@@ -454,6 +527,15 @@ mod tests {
     }
 
     #[test]
+    fn padded_counts_with_non_browser_shape_reads_as_automation() {
+        // An automation stack inflates its cipher/extension lists past the browser
+        // thresholds (15/16) but still negotiates HTTP/1.1 (`h1`) — a shape no real
+        // browser presents. Count-only thresholding misread this as `Browser`; the
+        // full-shape check classifies it as automation.
+        assert_eq!(classify_ja4(PADDED_AUTOMATION_JA4), ClientStack::Automation);
+    }
+
+    #[test]
     fn confidence_adjustment_boosts_consistent_penalises_mismatch_neutral_degrade() {
         let mk = |ip, c| PassiveSignals {
             ip_risk: ip,
@@ -470,6 +552,26 @@ mod tests {
         // The IP band is auxiliary — it never moves the adjustment.
         let degrade_high_ip = mk(IpRisk::High, TlsConsistency::Degraded).confidence_adjustment();
         assert!((degrade - degrade_high_ip).abs() < f64::EPSILON);
+    }
+
+    /// KNOWN SINGLE-REQUEST BYPASS — pinned regression baseline, NOT the desired
+    /// end state. A `CloakBrowser` (real stealth Chromium: genuine Chrome-shaped TLS,
+    /// honest Chrome UA, residential-proxy IP) passes *every* per-request passive
+    /// signal: its TLS stack matches its UA (a consistency boost, not a mismatch
+    /// penalty) and its residential IP reads as low risk. Nothing in a single
+    /// request distinguishes it from an honest user. This is intentional and
+    /// documented so any future change that closes or reopens the gap shows up as a
+    /// visible test diff rather than folklore. The signal that actually catches this
+    /// adversary is the cross-session velocity check (RT-003), not this module.
+    #[test]
+    fn cloak_browser_passes_every_single_request_signal() {
+        let intel = StaticIpIntel::new();
+        let sig = compute(Some(CLOAK_JA4), Some(CLOAK_IP), Some(CLOAK_UA), &intel);
+        // UA and TLS agree → the per-request check hands out a confidence boost.
+        assert_eq!(sig.tls_consistency, TlsConsistency::Consistent);
+        assert!(sig.confidence_adjustment() > 0.0);
+        // Residential proxy IP is indistinguishable from an honest user's.
+        assert_eq!(sig.ip_risk, IpRisk::Low);
     }
 
     #[test]

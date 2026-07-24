@@ -126,8 +126,6 @@ async fn identify(
                 return StatusCode::UNAUTHORIZED.into_response();
             }
 
-            let outcome = state.matcher.identify(&req.stable_components, now);
-
             // Cross-check the client-reported UA against the unforgeable
             // edge-observed TLS stack / IP. Trust edge headers only behind a
             // trusted edge; otherwise ignore any client-supplied copy (architecture §4.2
@@ -140,6 +138,18 @@ async fn identify(
             } else {
                 &empty
             };
+
+            // Read the client IP from the same trusted headers (untrusted origin
+            // -> None), so the cross-session new-device velocity signal is keyed on
+            // the edge-observed IP, never a client-forged one.
+            let client_ip = trusted_headers
+                .get(signals::CF_CONNECTING_IP)
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim);
+            let outcome = state
+                .matcher
+                .identify_with_ip(&req.stable_components, now, client_ip);
+
             let signals = signals::extract(trusted_headers, claimed_ua, &intel);
 
             // Fuse the passive adjustment into confidence, clamped to [0, 1]
@@ -157,6 +167,7 @@ async fn identify(
                 confidence,
                 tls_consistency = signals.tls_consistency.as_str(),
                 ip_risk = signals.ip_risk.as_str(),
+                new_device_velocity = outcome.new_device_velocity.as_str(),
                 "identified device",
             );
             let response = IdentifyResponse {
@@ -165,7 +176,10 @@ async fn identify(
                 is_new_device: outcome.is_new_device,
                 decision: outcome.decision.as_str(),
                 collision_risk: outcome.collision_risk,
-                signals: Signals::from(signals),
+                signals: Signals {
+                    new_device_velocity: outcome.new_device_velocity.as_str(),
+                    ..Signals::from(signals)
+                },
             };
             // Serialize once and, when signing is enabled, attach the signature
             // headers over those exact bytes so what is signed equals what is
@@ -424,6 +438,11 @@ struct Signals {
     ua_tls_consistent: bool,
     /// Coarse IP risk band.
     ip_risk: &'static str,
+    /// Cross-session new-device production-rate band for the client IP
+    /// (`low` / `medium` / `high`): an IP-keyed velocity signal that catches the
+    /// fresh-seed-per-launch farm no single request can. Surfaced alongside
+    /// `ip_risk`, never folded into the `visitorId`.
+    new_device_velocity: &'static str,
 }
 
 impl From<PassiveSignals> for Signals {
@@ -431,6 +450,8 @@ impl From<PassiveSignals> for Signals {
         Self {
             ua_tls_consistent: signals.tls_consistency.ua_tls_consistent(),
             ip_risk: signals.ip_risk.as_str(),
+            // Neutral default; the handler overrides this with the engine's band.
+            new_device_velocity: "low",
         }
     }
 }

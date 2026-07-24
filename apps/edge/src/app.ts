@@ -202,6 +202,10 @@ export function createApp(deps: Deps): Hono {
       signals: {
         ua_tls_consistent: verdict.ua_tls_consistent,
         ip_risk: verdict.ip_risk,
+        // Edge is stateless/score-only per request — it holds no cross-session
+        // velocity store, so it always reports the neutral `low` band (the native
+        // server computes the real one), mirroring an empty u_i/m_i store.
+        new_device_velocity: 'low',
       },
     }
 

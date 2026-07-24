@@ -79,6 +79,9 @@ impl AppState {
                 .then(|| config.fuzzy_record_ttl_secs.saturating_mul(1000)),
             max_frequency_values: Some(config.fuzzy_max_frequency_values),
             max_agreement_components: Some(config.fuzzy_max_agreement_components),
+            // No dedicated knob yet: use the generous fail-safe default so the
+            // cross-session velocity store is bounded but unaffected at small scale.
+            max_velocity_keys: EvictionPolicy::default().max_velocity_keys,
             max_block: config.fuzzy_max_block,
         };
         Self {

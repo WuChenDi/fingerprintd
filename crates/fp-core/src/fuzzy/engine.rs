@@ -24,6 +24,7 @@ use super::{
     FuzzyStore, classify,
     component::{Hash32, Stored, jaccard},
     record::FingerprintRecord,
+    velocity::{self, VelocityBand},
 };
 
 /// Score at or above which the best candidate is accepted as the same device
@@ -56,6 +57,14 @@ const M_FLOOR: f64 = 1e-4;
 const M_CEIL: f64 = 0.9999;
 /// Score scale (bits) over which confidence margins saturate (fuzzy-matching §6).
 const CONF_SCALE: f64 = 4.0;
+/// Confidence downgrade applied when a client IP's cross-session new-device rate
+/// reaches [`VelocityBand::High`] — the fresh-seed-per-launch farm's footprint.
+///
+/// TUNING PLACEHOLDER (a policy guess, not a measured claim): fused the same way
+/// as the passive-signal adjustment (`signals.rs` `confidence_adjustment`), it
+/// lowers decision confidence for a `NewDevice` verdict without touching the
+/// `visitorId` or the decision itself.
+const VELOCITY_PENALTY: f64 = 0.3;
 /// Component count of a full rich fingerprint. Confidence scales the number of
 /// components that actually took part in scoring against this, so a sparse probe
 /// (many missing) is less certain (fuzzy-matching §6/§8).
@@ -101,6 +110,12 @@ pub struct MatchOutcome {
     pub compared_components: usize,
     /// Whether a runner-up also cleared `T_hi` within [`COLLISION_GAP`].
     pub collision_risk: bool,
+    /// Cross-session new-device production-rate band for the client IP, a risk
+    /// signal surfaced alongside `ip_risk` (never folded into identity). Always
+    /// [`VelocityBand::Low`] from [`FuzzyStore::score`] and the no-IP identify
+    /// path — the band is computed only by [`FuzzyStore::identify_with_ip`] when a
+    /// client IP is supplied and a new device is minted.
+    pub new_device_velocity: VelocityBand,
 }
 
 /// Per-candidate stage-two score and its comparison count.
@@ -131,6 +146,34 @@ impl FuzzyStore {
     /// `observe` and never takes this guard, so the stateless edge remains
     /// lock-light and its parity/perf are unaffected.
     pub fn identify(&self, components: &Value, now_ms: u64) -> MatchOutcome {
+        self.identify_with_ip(components, now_ms, None)
+    }
+
+    /// Identify `components`, additionally computing the cross-session new-device
+    /// velocity band for the supplied `client_ip` (PLAN-004 red-team hardening).
+    ///
+    /// Behaves exactly like [`FuzzyStore::identify`] — same evaluate-then-observe
+    /// under the `identify_lock`, same persistence per verdict — and adds one
+    /// cross-session signal: **only** when the verdict is [`Decision::NewDevice`]
+    /// and a `client_ip` is present, it records a new-device event for that IP and
+    /// reads the trailing-window count, setting
+    /// [`MatchOutcome::new_device_velocity`] from [`VelocityBand::classify`]. A
+    /// [`VelocityBand::High`] rate — the fresh-seed-per-launch farm's footprint —
+    /// applies a documented [`VELOCITY_PENALTY`] confidence downgrade fused the
+    /// same way as `PassiveSignals::confidence_adjustment` (`signals.rs`). The
+    /// `visitorId` and the decision are never touched.
+    ///
+    /// With `client_ip` `None` (or any non-`NewDevice` verdict) the outcome is
+    /// byte-identical to today: the band stays [`VelocityBand::Low`] and no
+    /// confidence adjustment is applied, so an empty velocity store is cold-start
+    /// neutral. `now_ms` is Unix milliseconds; the velocity store keys on Unix
+    /// seconds (`now_ms / 1000`), keeping the core clock-free and deterministic.
+    pub fn identify_with_ip(
+        &self,
+        components: &Value,
+        now_ms: u64,
+        client_ip: Option<&str>,
+    ) -> MatchOutcome {
         // Hold the guard across evaluate + observe so the RMW is atomic; recover
         // from poisoning like the backend locks (a prior panic left no logical
         // corruption — the `()` guard carries no state).
@@ -138,7 +181,7 @@ impl FuzzyStore {
             .identify_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let outcome = self.evaluate(components);
+        let mut outcome = self.evaluate(components);
         // Persist per the verdict (fuzzy-matching §7): a confirmed match drifts the
         // winning template toward this observation and a new device is stored
         // under its freshly minted id; a review-band hit leaves the template
@@ -153,6 +196,20 @@ impl FuzzyStore {
             }
             Decision::NewDevice => {
                 self.observe(&outcome.visitor_id, components, now_ms);
+                // Cross-session velocity: a fresh device from a client IP that is
+                // churning out new devices is the farm footprint (RT-003). Record
+                // the event and band the trailing-window rate; a High rate
+                // downgrades confidence without touching identity.
+                if let Some(ip) = client_ip {
+                    let now_secs = now_ms / 1000;
+                    self.velocity.record(ip, now_secs);
+                    let n = self.velocity.count(ip, now_secs, velocity::WINDOW);
+                    outcome.new_device_velocity = VelocityBand::classify(n);
+                    if outcome.new_device_velocity == VelocityBand::High {
+                        outcome.confidence =
+                            (outcome.confidence - VELOCITY_PENALTY).clamp(0.0, 1.0);
+                    }
+                }
             }
             Decision::Review => {}
         }
@@ -227,6 +284,7 @@ impl FuzzyStore {
                     score: best_score,
                     compared_components: compared,
                     collision_risk,
+                    new_device_velocity: VelocityBand::Low,
                 }
             }
             (Decision::Review, Some((id, _))) => MatchOutcome {
@@ -237,6 +295,7 @@ impl FuzzyStore {
                 score: best_score,
                 compared_components: compared,
                 collision_risk: false,
+                new_device_velocity: VelocityBand::Low,
             },
             _ => {
                 let id = derive_visitor_id(components);
@@ -248,6 +307,7 @@ impl FuzzyStore {
                     score: best_score,
                     compared_components: compared,
                     collision_risk: false,
+                    new_device_velocity: VelocityBand::Low,
                 }
             }
         }
@@ -621,6 +681,71 @@ mod tests {
         assert_eq!(store.record(&id).unwrap().last_seen, 9_000);
     }
 
+    /// (RT-001) Fresh-seed-per-launch farming footprint — pinned regression
+    /// baseline. The `CloakBrowser` adversary re-seeds its fingerprint on every
+    /// launch, so successive sessions present fully distinct high-stability
+    /// components (webgl/platform/timezone/…). Each one lands in its own blocking
+    /// keys, recalls no prior device, and is minted as a brand-new device. That is
+    /// exactly the footprint of an account farm — many "new devices" in quick
+    /// succession — and it is invisible to this per-session engine by design. The
+    /// cross-session velocity signal (RT-003) is what catches this pattern; this
+    /// test documents the current per-session behaviour so the gap is a visible
+    /// baseline, not folklore.
+    #[test]
+    fn fresh_seed_per_launch_each_mints_a_new_device() {
+        use std::collections::HashSet;
+
+        let store = FuzzyStore::new();
+        // Three launches of the same stealth build, each with a freshly re-seeded
+        // fingerprint: every high-stability discriminant differs, so the blocking
+        // keys are disjoint and no launch recalls another.
+        let launches = [
+            json!({
+                "webgl": "ANGLE (NVIDIA GeForce RTX 3060)",
+                "platform": "Win32",
+                "timezone": "America/Chicago",
+                "audio": "124.11",
+                "cpu_cores": 12,
+                "device_memory": 16,
+                "fonts": ["Arial", "Calibri", "Segoe UI", "Tahoma"],
+                "user_agent": "Chrome/126",
+            }),
+            json!({
+                "webgl": "ANGLE (AMD Radeon RX 6800)",
+                "platform": "MacIntel",
+                "timezone": "Europe/Berlin",
+                "audio": "121.37",
+                "cpu_cores": 8,
+                "device_memory": 8,
+                "fonts": ["Helvetica", "SF Pro", "Menlo", "Geneva"],
+                "user_agent": "Chrome/126",
+            }),
+            json!({
+                "webgl": "ANGLE (Intel Iris Xe)",
+                "platform": "Linux x86_64",
+                "timezone": "Asia/Tokyo",
+                "audio": "119.82",
+                "cpu_cores": 4,
+                "device_memory": 4,
+                "fonts": ["Roboto", "Noto Sans", "Ubuntu", "DejaVu Sans"],
+                "user_agent": "Chrome/126",
+            }),
+        ];
+
+        let mut ids = HashSet::new();
+        for (i, probe) in launches.iter().enumerate() {
+            let out = store.identify(probe, 1_000 + i as u64 * 1_000);
+            assert_eq!(out.decision, Decision::NewDevice, "launch {i}");
+            assert!(out.is_new_device, "launch {i} should mint a new device");
+            assert!(
+                ids.insert(out.visitor_id),
+                "launch {i} produced a duplicate visitor_id",
+            );
+        }
+        // Every re-seeded launch is a distinct "new device" to this engine.
+        assert_eq!(ids.len(), launches.len());
+    }
+
     /// (concurrency) Many threads hammer `identify` against one shared store
     /// with a mix of the same and distinct devices. `identify`'s evaluate +
     /// observe run under the per-store guard, so the concurrent read-modify-write
@@ -892,5 +1017,122 @@ mod tests {
             est < ua_prior,
             "churning estimate {est} should fall below prior {ua_prior}"
         );
+    }
+
+    /// A distinct full probe per index: every high-stability discriminant differs,
+    /// so each recalls no prior device and is minted as a brand-new device — the
+    /// fresh-seed-per-launch farm's per-session footprint.
+    fn distinct_probe(i: u64) -> Value {
+        json!({
+            "webgl": format!("ANGLE (Vendor {i})"),
+            "platform": format!("Platform-{i}"),
+            "timezone": format!("Zone/{i}"),
+            "audio": format!("12{i}.5"),
+            "cpu_cores": 4 + i,
+            "device_memory": 4 + i,
+            "fonts": [
+                format!("F{i}a"), format!("F{i}b"), format!("F{i}c"),
+                format!("F{i}d"), format!("F{i}e"),
+            ],
+            "user_agent": format!("Agent/{i}"),
+        })
+    }
+
+    /// (RT-003) The cross-session catch: one client IP minting a burst of fresh
+    /// devices inside the window crosses to [`VelocityBand::High`] and takes the
+    /// documented confidence downgrade — while its decision/visitorId are
+    /// untouched. This is what RT-001's per-session
+    /// `fresh_seed_per_launch_each_mints_a_new_device` baseline cannot see.
+    #[test]
+    fn burst_of_new_devices_from_one_ip_crosses_to_high_and_downgrades() {
+        use super::velocity::HIGH;
+
+        let store = FuzzyStore::new();
+        let ip = "203.0.113.9";
+
+        // `HIGH` distinct fresh devices from one IP, all within the window
+        // (seconds apart). Each is a NewDevice; the last crosses the High band.
+        let mut last = None;
+        for i in 0..HIGH {
+            let probe = distinct_probe(i);
+            let out = store.identify_with_ip(&probe, 1_000_000 + i * 1_000, Some(ip));
+            assert_eq!(out.decision, Decision::NewDevice, "device {i}");
+            assert!(out.is_new_device);
+            last = Some(out);
+        }
+        let last = last.unwrap();
+        assert_eq!(last.new_device_velocity, super::VelocityBand::High);
+        // A no-candidate NewDevice's neutral confidence is 0.5; the High band
+        // subtracts the documented penalty, fused like the passive adjustment.
+        assert!(
+            (last.confidence - (0.5 - super::VELOCITY_PENALTY)).abs() < 1e-9,
+            "confidence was {}",
+            last.confidence,
+        );
+    }
+
+    /// The same burst spread *beyond* the window never accumulates: each event
+    /// ages out before the next, so the band stays [`VelocityBand::Low`] and no
+    /// downgrade is applied.
+    #[test]
+    fn new_devices_spread_beyond_the_window_stay_low() {
+        use super::velocity::{HIGH, WINDOW};
+
+        let store = FuzzyStore::new();
+        let ip = "203.0.113.10";
+
+        // Space events more than a window apart (in ms), so at each access the
+        // prior events have all aged out and the count is 1.
+        let step_ms = (WINDOW + 10) * 1_000;
+        let mut last = None;
+        for i in 0..HIGH {
+            let probe = distinct_probe(i);
+            let out = store.identify_with_ip(&probe, 1_000_000 + i * step_ms, Some(ip));
+            assert_eq!(out.decision, Decision::NewDevice, "device {i}");
+            last = Some(out);
+        }
+        let last = last.unwrap();
+        assert_eq!(last.new_device_velocity, super::VelocityBand::Low);
+        assert!(
+            (last.confidence - 0.5).abs() < 1e-9,
+            "no downgrade expected"
+        );
+    }
+
+    /// A `None` client IP is neutral: no event is recorded, the band stays
+    /// [`VelocityBand::Low`], and the outcome equals the plain `identify` path.
+    #[test]
+    fn no_client_ip_stays_low_and_neutral() {
+        let store = FuzzyStore::new();
+        let probe = distinct_probe(1);
+        let out = store.identify_with_ip(&probe, 1_000_000, None);
+        assert_eq!(out.new_device_velocity, super::VelocityBand::Low);
+        assert!((out.confidence - 0.5).abs() < 1e-9);
+
+        // A brand-new IP that later mints a single device is Low (below MEDIUM).
+        let other = distinct_probe(2);
+        let banded = store.identify_with_ip(&other, 1_000_100, Some("198.51.100.7"));
+        assert_eq!(banded.new_device_velocity, super::VelocityBand::Low);
+    }
+
+    /// Cold-start invariance: on a fresh store, the first `identify` is unchanged
+    /// for every field that existed before RT-003 (decision / visitorId /
+    /// `is_new_device`), and the new band defaults to [`VelocityBand::Low`] — so an
+    /// empty velocity store is bit-identical to today and the delegating `identify`
+    /// matches an explicit no-IP `identify_with_ip`.
+    #[test]
+    fn cold_start_is_neutral_and_identify_delegates_to_no_ip() {
+        let probe = full_probe();
+
+        let via_identify = FuzzyStore::new().identify(&probe, 1_000);
+        let via_no_ip = FuzzyStore::new().identify_with_ip(&probe, 1_000, None);
+
+        assert_eq!(via_identify.decision, Decision::NewDevice);
+        assert_eq!(via_identify.new_device_velocity, super::VelocityBand::Low);
+        // The two paths agree on the pre-existing identity fields and confidence.
+        assert_eq!(via_identify.decision, via_no_ip.decision);
+        assert_eq!(via_identify.visitor_id, via_no_ip.visitor_id);
+        assert_eq!(via_identify.is_new_device, via_no_ip.is_new_device);
+        assert!((via_identify.confidence - via_no_ip.confidence).abs() < f64::EPSILON);
     }
 }

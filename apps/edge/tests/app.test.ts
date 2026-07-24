@@ -120,7 +120,12 @@ describe('POST /identify', () => {
     expect(body.confidence).toBeGreaterThanOrEqual(0)
     expect(body.confidence).toBeLessThanOrEqual(1)
     // Neutral degraded signals when no Bot Management headers are present.
-    expect(body.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
+    // The edge is stateless, so `new_device_velocity` is always the neutral `low`.
+    expect(body.signals).toEqual({
+      ua_tls_consistent: true,
+      ip_risk: 'low',
+      new_device_velocity: 'low',
+    })
   })
 
   it('rejects an unknown top-level field with 400 (strict schema)', async () => {
@@ -328,6 +333,7 @@ describe('passive signals (edge JA4/IP fusion)', () => {
     expect(degraded.signals).toEqual({
       ua_tls_consistent: true,
       ip_risk: 'low',
+      new_device_velocity: 'low',
     })
 
     const consistent = await identifyWith(deps, {
@@ -392,7 +398,11 @@ describe('passive signals (edge JA4/IP fusion)', () => {
       'cf-bot-management-ja4': AUTOMATION_JA4,
       'cf-connecting-ip': '34.120.5.6',
     })
-    expect(forged.signals).toEqual({ ua_tls_consistent: true, ip_risk: 'low' })
+    expect(forged.signals).toEqual({
+      ua_tls_consistent: true,
+      ip_risk: 'low',
+      new_device_velocity: 'low',
+    })
     // The forged copy neither downgrades confidence nor raises the IP band.
     expect(forged.confidence).toBeCloseTo(baseline.confidence, 12)
   })
