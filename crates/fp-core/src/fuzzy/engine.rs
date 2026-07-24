@@ -116,6 +116,13 @@ pub struct MatchOutcome {
     /// path — the band is computed only by [`FuzzyStore::identify_with_ip`] when a
     /// client IP is supplied and a new device is minted.
     pub new_device_velocity: VelocityBand,
+    /// Cross-session new-device production-rate band for the client's coarse JA4
+    /// **class** (proxy-pool farm footprint, PLAN-006 HARDEN-002), surfaced
+    /// alongside [`new_device_velocity`](MatchOutcome::new_device_velocity) —
+    /// never folded into identity, and (under the default fusion) never into
+    /// confidence either. Always [`VelocityBand::Low`] unless a JA4 is supplied to
+    /// [`FuzzyStore::identify_with_signals`] and a new device is minted.
+    pub new_device_velocity_ja4: VelocityBand,
 }
 
 /// Per-candidate stage-two score and its comparison count.
@@ -146,33 +153,71 @@ impl FuzzyStore {
     /// `observe` and never takes this guard, so the stateless edge remains
     /// lock-light and its parity/perf are unaffected.
     pub fn identify(&self, components: &Value, now_ms: u64) -> MatchOutcome {
-        self.identify_with_ip(components, now_ms, None)
+        self.identify_with_signals(components, now_ms, None, None)
     }
 
-    /// Identify `components`, additionally computing the cross-session new-device
-    /// velocity band for the supplied `client_ip` (PLAN-004 red-team hardening).
-    ///
-    /// Behaves exactly like [`FuzzyStore::identify`] — same evaluate-then-observe
-    /// under the `identify_lock`, same persistence per verdict — and adds one
-    /// cross-session signal: **only** when the verdict is [`Decision::NewDevice`]
-    /// and a `client_ip` is present, it records a new-device event for that IP and
-    /// reads the trailing-window count, setting
-    /// [`MatchOutcome::new_device_velocity`] from [`VelocityBand::classify`]. A
-    /// [`VelocityBand::High`] rate — the fresh-seed-per-launch farm's footprint —
-    /// applies a documented [`VELOCITY_PENALTY`] confidence downgrade fused the
-    /// same way as `PassiveSignals::confidence_adjustment` (`signals.rs`). The
-    /// `visitorId` and the decision are never touched.
-    ///
-    /// With `client_ip` `None` (or any non-`NewDevice` verdict) the outcome is
-    /// byte-identical to today: the band stays [`VelocityBand::Low`] and no
-    /// confidence adjustment is applied, so an empty velocity store is cold-start
-    /// neutral. `now_ms` is Unix milliseconds; the velocity store keys on Unix
-    /// seconds (`now_ms / 1000`), keeping the core clock-free and deterministic.
+    /// Identify `components`, additionally computing the per-IP cross-session
+    /// new-device velocity band for the supplied `client_ip` (PLAN-004 red-team
+    /// hardening). Thin wrapper over [`FuzzyStore::identify_with_signals`] with no
+    /// JA4 supplied — behaviourally unchanged from before HARDEN-002.
     pub fn identify_with_ip(
         &self,
         components: &Value,
         now_ms: u64,
         client_ip: Option<&str>,
+    ) -> MatchOutcome {
+        self.identify_with_signals(components, now_ms, client_ip, None)
+    }
+
+    /// Identify `components`, additionally computing the cross-session new-device
+    /// velocity bands for the supplied `client_ip` and raw `ja4` fingerprint.
+    ///
+    /// Behaves exactly like [`FuzzyStore::identify`] — same evaluate-then-observe
+    /// under the `identify_lock`, same persistence per verdict — and adds two
+    /// independent cross-session signals, both computed **only** when the verdict
+    /// is [`Decision::NewDevice`]:
+    ///
+    /// - **per-IP** (PLAN-004): when `client_ip` is present, records a new-device
+    ///   event for that IP and bands the trailing-window count into
+    ///   [`MatchOutcome::new_device_velocity`] via [`VelocityBand::classify`]. A
+    ///   [`VelocityBand::High`] rate — the fresh-seed-per-launch farm's footprint
+    ///   — applies the documented [`VELOCITY_PENALTY`] confidence downgrade, fused
+    ///   like `PassiveSignals::confidence_adjustment` (`signals.rs`).
+    /// - **per-JA4-class** (PLAN-006 HARDEN-002): when `ja4` parses to a coarse
+    ///   class ([`crate::signals::ja4_class`]), records a new-device event for
+    ///   that class *alongside* the IP key (namespaced so the two never collide in
+    ///   the shared store) and bands the count into
+    ///   [`MatchOutcome::new_device_velocity_ja4`] via
+    ///   [`VelocityBand::classify_ja4`] — deliberately far-higher thresholds,
+    ///   since a JA4 class is shared by every real client of a browser family.
+    ///   This catches a farm that rotates a residential proxy pool (defeating the
+    ///   per-IP key) but shares one Chrome JA4 class.
+    ///
+    /// **Fusion — option (a), surface-only (DELIBERATE, load-bearing):** the
+    /// JA4-class band is surfaced but applies **no** confidence change of its own,
+    /// even at [`VelocityBand::High`]. A JA4 class is low-entropy and shared by
+    /// *every* real Chrome user, so a lone High JA4-class band is the *expected*
+    /// steady state for any popular class — penalising it would downgrade all
+    /// normal Chrome traffic (a mass false positive). A safe confidence fusion
+    /// would require corroboration by an *independent* adverse signal (per-IP band
+    /// High, or a datacenter IP-risk verdict), but the per-IP `IpRisk` classifier
+    /// lives in the HTTP/edge adapter, not this core engine, and the target
+    /// adversary rides *residential* proxies (IP-risk Low) — so no safe composite
+    /// is defensible from here. Confidence fusion for the JA4-class band is
+    /// therefore deferred to a follow-up (L1/user decision); only the per-IP band
+    /// moves confidence.
+    ///
+    /// With both signals absent (or any non-`NewDevice` verdict) the outcome is
+    /// byte-identical to before: both bands stay [`VelocityBand::Low`] and no
+    /// confidence adjustment is applied, so an empty velocity store is cold-start
+    /// neutral. `now_ms` is Unix milliseconds; the velocity store keys on Unix
+    /// seconds (`now_ms / 1000`), keeping the core clock-free and deterministic.
+    pub fn identify_with_signals(
+        &self,
+        components: &Value,
+        now_ms: u64,
+        client_ip: Option<&str>,
+        ja4: Option<&str>,
     ) -> MatchOutcome {
         // Hold the guard across evaluate + observe so the RMW is atomic; recover
         // from poisoning like the backend locks (a prior panic left no logical
@@ -209,6 +254,25 @@ impl FuzzyStore {
                         outcome.confidence =
                             (outcome.confidence - VELOCITY_PENALTY).clamp(0.0, 1.0);
                     }
+                }
+                // Secondary JA4-class velocity (HARDEN-002): record ALONGSIDE the
+                // IP key, under the coarse JA4 shape class, to catch a farm that
+                // rotates a proxy pool but shares one Chrome JA4 class. The key is
+                // namespaced ("ja4:") so a class string can never collide with an
+                // IP key in the shared store.
+                //
+                // Fusion is option (a) — surface only: the band is set but NO
+                // confidence downgrade is applied on its own (not even at High).
+                // JA4 is low-entropy and shared by every real Chrome user, so a
+                // lone High JA4-class band is the expected steady state and must
+                // not penalise all Chrome traffic. Confidence fusion is deferred
+                // (see the method doc); only the per-IP band above moves confidence.
+                if let Some(class) = ja4.and_then(crate::signals::ja4_class) {
+                    let now_secs = now_ms / 1000;
+                    let key = format!("ja4:{class}");
+                    self.velocity.record(&key, now_secs);
+                    let n = self.velocity.count(&key, now_secs, velocity::WINDOW);
+                    outcome.new_device_velocity_ja4 = VelocityBand::classify_ja4(n);
                 }
             }
             Decision::Review => {}
@@ -285,6 +349,7 @@ impl FuzzyStore {
                     compared_components: compared,
                     collision_risk,
                     new_device_velocity: VelocityBand::Low,
+                    new_device_velocity_ja4: VelocityBand::Low,
                 }
             }
             (Decision::Review, Some((id, _))) => MatchOutcome {
@@ -296,6 +361,7 @@ impl FuzzyStore {
                 compared_components: compared,
                 collision_risk: false,
                 new_device_velocity: VelocityBand::Low,
+                new_device_velocity_ja4: VelocityBand::Low,
             },
             _ => {
                 let id = derive_visitor_id(components);
@@ -308,6 +374,7 @@ impl FuzzyStore {
                     compared_components: compared,
                     collision_risk: false,
                     new_device_velocity: VelocityBand::Low,
+                    new_device_velocity_ja4: VelocityBand::Low,
                 }
             }
         }
@@ -966,5 +1033,79 @@ mod tests {
             (last.confidence - 0.5).abs() < 1e-9,
             "no downgrade expected"
         );
+    }
+
+    /// A real-browser JA4 (Chrome-over-HTTP/2 shape); its coarse class
+    /// (`t13dh2`) is shared by every real client of that family.
+    const BROWSER_JA4: &str = "t13d1516h2_8daaf6152771_02713d6af862";
+
+    /// (HARDEN-002) The proxy-pool farm catch: many fresh devices that share ONE
+    /// coarse JA4 class — each from a different (here absent) IP — drive the
+    /// per-class velocity band up through its far-higher thresholds. This is the
+    /// footprint the per-IP key (RT-003) misses when a farm rotates a residential
+    /// proxy pool but keeps one Chrome JA4 class. The band rises (crossing MEDIUM,
+    /// then HIGH) while the per-IP band and — under fusion (a) — confidence stay
+    /// untouched.
+    #[test]
+    fn burst_sharing_one_ja4_class_rises_but_band_only_never_downgrades() {
+        use super::velocity::{JA4_HIGH, JA4_MEDIUM};
+
+        let store = FuzzyStore::new();
+
+        let mut at_medium = None;
+        let mut last = None;
+        for i in 0..JA4_HIGH {
+            let probe = distinct_probe(i);
+            // No client IP: the JA4-class band must rise on its own, with NO
+            // per-IP corroboration — the load-bearing lone-High case.
+            let out =
+                store.identify_with_signals(&probe, 1_000_000 + i * 1_000, None, Some(BROWSER_JA4));
+            assert_eq!(out.decision, Decision::NewDevice, "device {i}");
+            // The per-IP band never moves (no IP supplied).
+            assert_eq!(out.new_device_velocity, super::VelocityBand::Low);
+            if i + 1 == JA4_MEDIUM {
+                at_medium = Some(out.clone());
+            }
+            last = Some(out);
+        }
+
+        // Crossing MEDIUM: the per-class band is Medium at the documented threshold.
+        assert_eq!(
+            at_medium.unwrap().new_device_velocity_ja4,
+            super::VelocityBand::Medium
+        );
+
+        // Crossing HIGH: the per-class band reaches High...
+        let last = last.unwrap();
+        assert_eq!(last.new_device_velocity_ja4, super::VelocityBand::High);
+        // ...yet confidence is UNTOUCHED. Fusion (a): a lone High JA4-class band,
+        // with no IP-High and no datacenter IP risk, must NOT downgrade confidence
+        // — else every popular real Chrome class would be penalised. A
+        // no-candidate NewDevice's neutral confidence is 0.5, unchanged here.
+        assert!(
+            (last.confidence - 0.5).abs() < 1e-9,
+            "lone High JA4 band must not downgrade confidence; was {}",
+            last.confidence,
+        );
+    }
+
+    /// No (or unparseable) JA4 is neutral for the per-class band: no event is
+    /// recorded, the band stays [`VelocityBand::Low`], and confidence is
+    /// untouched — an empty JA4 velocity store is cold-start neutral, so the
+    /// parity vectors stay byte-identical.
+    #[test]
+    fn absent_or_malformed_ja4_keeps_the_class_band_low_and_neutral() {
+        let store = FuzzyStore::new();
+
+        // No JA4 at all (an IP is present, exercising the IP path independently).
+        let out =
+            store.identify_with_signals(&distinct_probe(1), 1_000_000, Some("198.51.100.7"), None);
+        assert_eq!(out.new_device_velocity_ja4, super::VelocityBand::Low);
+
+        // A malformed JA4 parses to no class → no event recorded → band stays Low.
+        let out2 =
+            store.identify_with_signals(&distinct_probe(2), 1_000_100, None, Some("garbage"));
+        assert_eq!(out2.new_device_velocity_ja4, super::VelocityBand::Low);
+        assert!((out2.confidence - 0.5).abs() < 1e-9);
     }
 }

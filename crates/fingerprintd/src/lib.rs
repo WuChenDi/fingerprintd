@@ -139,16 +139,24 @@ async fn identify(
                 &empty
             };
 
-            // Read the client IP from the same trusted headers (untrusted origin
-            // -> None), so the cross-session new-device velocity signal is keyed on
-            // the edge-observed IP, never a client-forged one.
+            // Read the client IP and TLS JA4 from the same trusted headers
+            // (untrusted origin -> None), so the cross-session new-device velocity
+            // signals are keyed on the edge-observed values, never client-forged
+            // ones. The JA4 feeds a secondary per-class velocity key (HARDEN-002)
+            // alongside the per-IP key, catching a proxy-pool farm that shares one
+            // Chrome JA4 class.
             let client_ip = trusted_headers
                 .get(signals::CF_CONNECTING_IP)
                 .and_then(|v| v.to_str().ok())
                 .map(str::trim);
-            let outcome = state
-                .matcher
-                .identify_with_ip(&req.stable_components, now, client_ip);
+            let ja4 = trusted_headers
+                .get(signals::JA4_HEADER)
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim);
+            let outcome =
+                state
+                    .matcher
+                    .identify_with_signals(&req.stable_components, now, client_ip, ja4);
 
             let signals = signals::extract(trusted_headers, claimed_ua, &intel);
 
@@ -168,6 +176,7 @@ async fn identify(
                 tls_consistency = signals.tls_consistency.as_str(),
                 ip_risk = signals.ip_risk.as_str(),
                 new_device_velocity = outcome.new_device_velocity.as_str(),
+                new_device_velocity_ja4 = outcome.new_device_velocity_ja4.as_str(),
                 "identified device",
             );
             let response = IdentifyResponse {
@@ -178,6 +187,7 @@ async fn identify(
                 collision_risk: outcome.collision_risk,
                 signals: Signals {
                     new_device_velocity: outcome.new_device_velocity.as_str(),
+                    new_device_velocity_ja4: outcome.new_device_velocity_ja4.as_str(),
                     ..Signals::from(signals)
                 },
             };
@@ -443,6 +453,13 @@ struct Signals {
     /// fresh-seed-per-launch farm no single request can. Surfaced alongside
     /// `ip_risk`, never folded into the `visitorId`.
     new_device_velocity: &'static str,
+    /// Cross-session new-device production-rate band for the client's coarse JA4
+    /// **class** (`low` / `medium` / `high`): a secondary velocity signal keyed on
+    /// the shared TLS shape, catching a proxy-pool farm that rotates IPs but keeps
+    /// one Chrome JA4 class. Surfaced alongside `new_device_velocity`; low-entropy
+    /// and shared by all real Chrome, so it is a reported band only — never folded
+    /// into the `visitorId`, and (by default) not into `confidence`.
+    new_device_velocity_ja4: &'static str,
 }
 
 impl From<PassiveSignals> for Signals {
@@ -450,8 +467,9 @@ impl From<PassiveSignals> for Signals {
         Self {
             ua_tls_consistent: signals.tls_consistency.ua_tls_consistent(),
             ip_risk: signals.ip_risk.as_str(),
-            // Neutral default; the handler overrides this with the engine's band.
+            // Neutral defaults; the handler overrides these with the engine's bands.
             new_device_velocity: "low",
+            new_device_velocity_ja4: "low",
         }
     }
 }
@@ -754,6 +772,22 @@ mod tests {
         assert_eq!(degraded["is_new_device"], json!(true));
         assert_eq!(degraded["signals"]["ua_tls_consistent"], json!(true));
         assert_eq!(degraded["signals"]["ip_risk"], json!("low"));
+    }
+
+    #[tokio::test]
+    async fn signals_expose_the_ja4_class_velocity_band() {
+        // A single request behind a trusted edge carrying a real-browser JA4: the
+        // response surfaces the secondary per-class velocity band, at its neutral
+        // `low` default (one device is far below the class threshold).
+        let body = identify_signals(
+            true,
+            &[
+                (CF_CONNECTING_IP, "198.51.100.7"),
+                (JA4_HEADER, BROWSER_JA4),
+            ],
+        )
+        .await;
+        assert_eq!(body["signals"]["new_device_velocity_ja4"], json!("low"));
     }
 
     #[tokio::test]

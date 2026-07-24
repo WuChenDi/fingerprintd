@@ -26,6 +26,7 @@ import { D1FingerprintStore } from './fingerprint-store-d1'
 import { DurableNonceStore } from './nonce-do'
 import type { CandidateSource, NonceStore } from './state'
 import { EmptyCandidateSource, InMemoryNonceStore } from './state'
+import { VelocityStore } from './velocity-do'
 
 export { NonceDurableObject } from './nonce-do'
 export { VelocityDurableObject } from './velocity-do'
@@ -47,6 +48,10 @@ function buildDeps(env: Env): Deps {
     checkin: env.CHECKIN_DB
       ? new D1CheckinStore(env.CHECKIN_DB)
       : new EmptyCheckinStore(),
+    // The VELOCITY Durable Object backs the cross-session new-device velocity
+    // signal; unbound ⇒ omitted, and the /identify path degrades to the neutral
+    // `low` band (fail-open), like the pre-DO stateless edge.
+    velocity: env.VELOCITY ? new VelocityStore(env.VELOCITY) : undefined,
   }
   return deps
 }

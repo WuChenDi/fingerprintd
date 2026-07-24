@@ -42,6 +42,27 @@ describe('ip_account velocity', () => {
   })
 })
 
+describe('new-device velocity', () => {
+  it('counts distinct new devices per IP over the window', async () => {
+    const store = new VelocityStore(env.VELOCITY)
+    // Each NewDevice mints a fresh visitorId, so distinct visitorIds seen for the
+    // IP is the new-device count fp-core bands.
+    expect(await store.newDeviceVelocityIp('1.2.3.4', 'v1', MINUTE)).toBe(1)
+    expect(await store.newDeviceVelocityIp('1.2.3.4', 'v2', MINUTE)).toBe(2)
+    // The `nv:` scope is independent of the JA4-class `nvja4:` scope and the
+    // check-in `ip:`/`v:` scopes, even for a same-named key.
+    expect(await store.newDeviceVelocityJa4('1.2.3.4', 'v1', MINUTE)).toBe(1)
+    expect(await store.ipAccountVelocity('1.2.3.4', 'v1', MINUTE)).toBe(1)
+  })
+
+  it('counts distinct new devices per JA4 class independently', async () => {
+    const store = new VelocityStore(env.VELOCITY)
+    expect(await store.newDeviceVelocityJa4('t13dh2', 'v1', MINUTE)).toBe(1)
+    expect(await store.newDeviceVelocityJa4('t13dh2', 'v2', MINUTE)).toBe(2)
+    expect(await store.newDeviceVelocityJa4('q13dh3', 'v1', MINUTE)).toBe(1)
+  })
+})
+
 describe('window expiry', () => {
   it('drops members whose window has lapsed', async () => {
     const store = new VelocityStore(env.VELOCITY)
