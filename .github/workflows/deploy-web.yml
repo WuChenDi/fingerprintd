@@ -40,15 +40,15 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
-      # Bun workspace install from the repo root (one lockfile for all packages).
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # Rebuild the SDK's vendored WASM from source with the deployment's probe
-      # key, so the browser computes the SAME T8 probe the edge Worker verifies.
-      # The committed WASM is dev-keyed (test vector); without this the deployed
-      # playground would ship it and /identify would 401 under probe enforcement.
-      # Mirrors deploy-edge.yml's rebuild. FP_PROBE_KEY unset ⇒ the dev default.
+      # Build the SDK's vendored WASM from source with the deployment's probe key,
+      # so the browser computes the SAME T8 probe the edge Worker verifies. The
+      # WASM is a build output (not committed); without this the deployed
+      # playground could 401 under probe enforcement. Mirrors deploy-edge.yml's
+      # rebuild. FP_PROBE_KEY unset ⇒ the dev default.
+      #
+      # MUST run before `bun install`: the repo-root `prepare` script builds the
+      # `@cdlab/fingerprintd-client` SDK on install, which imports this vendored
+      # glue under `packages/client/wasm`.
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,14 +62,19 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Rebuild SDK WASM (crates/fp-wasm -> packages/client/wasm)
+      - name: Build SDK WASM (crates/fp-wasm -> packages/client/wasm)
         env:
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
         # `--out-dir` is resolved relative to the CRATE dir, so pass an ABSOLUTE
         # path — a repo-relative `packages/client/wasm` would silently land in
         # `crates/fp-wasm/packages/client/wasm` and the real vendor dir (which the
-        # SPA bundles) would keep its committed dev-keyed WASM.
+        # SPA bundles) would keep the wrong WASM.
         run: wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/packages/client/wasm" crates/fp-wasm
+
+      # Bun workspace install from the repo root (one lockfile for all packages).
+      # The root `prepare` builds the SDK here, bundling the freshly-keyed WASM.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       # The SPA consumes the built SDK — its dist/ is gitignored, so build it
       # (bundling the freshly-keyed WASM) before the app so `@cdlab/fingerprintd-client`

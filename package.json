@@ -41,6 +41,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "build": "bun run --filter '*' build",
+    "build:wasm": "bash scripts/build-wasm.sh",
     "clean": "bash scripts/clean.sh",
     "verify:edge": "bun scripts/verify-deploy.ts",
     "prepare": "bun run --filter=./packages/* build"

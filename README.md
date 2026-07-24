@@ -160,6 +160,12 @@ cargo deny check
 
 The deny-warnings policy lives in `[workspace.lints]`; CI runs the same commands plus the SDK and Worker suites (`.github/workflows/`). The Rust and TypeScript stacks are held to one behavior by a shared **parity fixture** exercised on both sides (see [`apps/edge/README.md`](apps/edge/README.md)).
 
+> **Vendored WASM.** `apps/edge/wasm` and `packages/client/wasm` are build outputs of [`crates/fp-wasm`](crates/fp-wasm) and are **not committed**. After a fresh clone (or `bun run clean`), build them once before any TypeScript work — `bun install` itself needs them, since the repo-root `prepare` builds the SDK:
+>
+> ```bash
+> bun run build:wasm   # wasm-pack build crates/fp-wasm -> apps/edge/wasm + packages/client/wasm
+> ```
+
 Per-component tooling:
 
 - **SDK** — `cd packages/client && bun run lint && bun run typecheck && bun run test`

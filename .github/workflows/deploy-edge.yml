@@ -52,16 +52,16 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
-      # Bun workspace install from the repo root (one lockfile for both packages).
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # Rebuild the vendored WASM from source so the deployed Worker ships a
-      # reproducible artifact rather than the committed dev build. FP_PROBE_KEY is
-      # baked in at compile time (crates/fp-wasm `option_env!`); unset ⇒ the dev
-      # placeholder. This is supply-chain reproducibility only: /identify still
-      # verifies probes with the RUNTIME key, and browser-client parity is a
-      # packages/client concern (rebuild packages/client/wasm with the same key later).
+      # Build the vendored WASM from source so the deployed Worker ships a
+      # reproducible artifact (the WASM is a build output, not committed).
+      # FP_PROBE_KEY is baked in at compile time (crates/fp-wasm `option_env!`);
+      # unset ⇒ the dev placeholder. This is supply-chain reproducibility only:
+      # /identify still verifies probes with the RUNTIME key, and browser-client
+      # parity is a packages/client concern (rebuilt in deploy-web.yml).
+      #
+      # MUST run before `bun install`: the repo-root `prepare` script builds the
+      # `@cdlab/fingerprintd-client` SDK on install, which imports the vendored
+      # glue under `packages/client/wasm` — so we materialise both dirs first.
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -75,13 +75,21 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Rebuild vendored WASM (crates/fp-wasm -> apps/edge/wasm)
+      - name: Build vendored WASM (crates/fp-wasm -> apps/edge/wasm + packages/client/wasm)
         env:
           FP_PROBE_KEY: ${{ secrets.FP_PROBE_KEY }}
         # `--out-dir` is resolved relative to the CRATE dir — pass an ABSOLUTE
-        # path, else it lands in `crates/fp-wasm/apps/edge/wasm` and the deployed
-        # Worker ships the committed WASM instead of this fresh build.
-        run: wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/apps/edge/wasm" crates/fp-wasm
+        # path, else it lands in `crates/fp-wasm/apps/edge/wasm`. The client copy
+        # only exists so the root `prepare` SDK build succeeds during install; the
+        # deployed Worker consumes `apps/edge/wasm`.
+        run: |
+          wasm-pack build --target web --out-dir "$GITHUB_WORKSPACE/apps/edge/wasm" crates/fp-wasm
+          mkdir -p "$GITHUB_WORKSPACE/packages/client/wasm"
+          cp -R "$GITHUB_WORKSPACE/apps/edge/wasm/." "$GITHUB_WORKSPACE/packages/client/wasm/"
+
+      # Bun workspace install from the repo root (one lockfile for both packages).
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       # Optional: apply the drizzle-kit migrations in apps/edge/src/database to
       # the remote D1 bound in wrangler.jsonc before the code goes live.
