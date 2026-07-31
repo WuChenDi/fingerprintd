@@ -47,8 +47,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "jsdom": "^29.1.1",
-    "tsdown": "^0.22.13",
+    "jsdom": "^30.0.1",
+    "tsdown": "^0.22.14",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

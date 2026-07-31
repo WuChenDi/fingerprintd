@@ -35,12 +35,12 @@
   "dependencies": {
     "@hono/zod-validator": "^0.9.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.31",
+    "hono": "^4.12.32",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.7",
-    "@cloudflare/workers-types": "^5.20260723.1",
+    "@cloudflare/vitest-pool-workers": "^0.19.1",
+    "@cloudflare/workers-types": "^5.20260731.1",
     "@types/node": "catalog:",
     "drizzle-kit": "^0.31.10",
     "typescript": "catalog:",
